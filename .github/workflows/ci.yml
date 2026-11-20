@@ -14,6 +14,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  code-quality:
+    name: Code quality and syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Ruff
+        run: python -m pip install --upgrade pip ruff
+      - name: Check Python formatting and lint
+        run: ruff check .
+      - name: Check Python syntax
+        run: python -m compileall -q .
+
   self-tests:
     name: Repository self-tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -34,5 +51,7 @@ jobs:
           if [ -f requirements.txt ]; then
             python -m pip install -r requirements.txt
           fi
+      - name: Verify installed dependency consistency
+        run: python -m pip check
       - name: Run repository self-tests
         run: python -m providers._tests
