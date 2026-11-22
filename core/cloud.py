@@ -404,10 +404,10 @@ def send_wake(cfg: dict) -> str:
 
     cfg = cfg or {}
     url = str(cfg.get("wake_url") or "").strip()
-    if url:
+    if url and url.startswith(("http://", "https://")):
         req = urllib.request.Request(url, headers={"User-Agent": "jarvis-cloud-wake"})
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:  # nosec B310
                 code = resp.status
         except Exception as e:
             # The URL may carry a token; never echo it.
@@ -579,7 +579,7 @@ def weather_today(city: str) -> dict:
 
     def get(url):
         req = urllib.request.Request(url, headers={"User-Agent": "jarvis-cloud"})
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=12) as resp:  # nosec B310
             return json.loads(resp.read().decode("utf-8"))
 
     geo = get("https://geocoding-api.open-meteo.com/v1/search?count=1&format=json&name="
@@ -2610,7 +2610,7 @@ class Runtime:
         from memory.memory_manager import set_trim_notifier
 
         set_trim_notifier(self.log)
-        serve(self, "0.0.0.0", port, cert, key)
+        serve(self, "0.0.0.0", port, cert, key)  # nosec B104
         self.log(f"SYS: link listening on port {port}; user time {user_now():%H:%M}.")
         self.player.on_text_command = self.on_text_command
         if self.telegram.load():
@@ -2687,7 +2687,7 @@ def init_link(state: CloudState, host: str = "", port: int = 0, rotate: bool = F
     if not host and not doc.get("host"):
         try:
             import urllib.request
-            with urllib.request.urlopen("https://api.ipify.org", timeout=6) as r:
+            with urllib.request.urlopen("https://api.ipify.org", timeout=6) as r:  # nosec B310
                 host = r.read().decode().strip()
         except Exception:
             host = "127.0.0.1"

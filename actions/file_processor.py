@@ -189,11 +189,14 @@ def _process_pdf(path: Path, action: str, params: dict, speak=None) -> str:
                     text += (page.extract_text() or "") + "\n"
         except ImportError:
             try:
-                import PyPDF2
+                try:
+                    import pypdf as _pdf_mod
+                except ImportError:
+                    import PyPDF2 as _pdf_mod
                 with open(path, "rb") as f:
-                    reader = PyPDF2.PdfReader(f)
+                    reader = _pdf_mod.PdfReader(f)
                     for page in reader.pages:
-                        text += page.extract_text() + "\n"
+                        text += (page.extract_text() or "") + "\n"
             except ImportError:
                 return ""
         return text[:max_chars]
@@ -684,7 +687,8 @@ def _process_video(path: Path, action: str, params: dict, speak=None) -> str:
     if action == "transcribe":
         if not _ffmpeg_available():
             return "ffmpeg not found. Needed for video transcription."
-        tmp_audio = Path(tempfile.mktemp(suffix=".mp3"))
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf:
+            tmp_audio = Path(tf.name)
         try:
             subprocess.run(
                 ["ffmpeg", "-i", str(path), "-q:a", "0", "-map", "a",

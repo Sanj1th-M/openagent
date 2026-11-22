@@ -46,7 +46,13 @@ def _log(message: str, player=None) -> None:
     print(f"[Weather] {message}")
     if player:
         try:
-            player.write_log(f"JARVIS: {message}")
+            name = "Jarvis"
+            if hasattr(player, "assistant_name"):
+                name = player.assistant_name()
+            else:
+                from memory.config_manager import get_assistant_name
+                name = get_assistant_name()
+            player.write_log(f"{name}: {message}")
         except Exception:
             pass
 

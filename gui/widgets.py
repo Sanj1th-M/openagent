@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
 
 from gui.theme import (
     C,
+    CONFIG_DIR,
     _OS,
     qcol,
 )
@@ -366,16 +367,18 @@ class FileDropZone(QWidget):
         pick_file = menu.addAction("📄  Choose a file…")
         pick_dir = menu.addAction("📁  Choose a folder…  (for coding)")
         chosen = menu.exec(QCursor.pos())
+        from memory.config_manager import get_assistant_name
+        _asst = get_assistant_name()
         if chosen is pick_dir:
             path = QFileDialog.getExistingDirectory(
-                self, "Select a project folder for JARVIS", str(Path.home()))
+                self, f"Select a project folder for {_asst}", str(Path.home()))
             if path:
                 self._set_file(path)
             return
         if chosen is not pick_file:
             return
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select a file for JARVIS", str(Path.home()),
+            self, f"Select a file for {_asst}", str(Path.home()),
             "All Files (*.*);;"
             "Images (*.jpg *.jpeg *.png *.gif *.webp *.bmp *.svg);;"
             "Documents (*.pdf *.docx *.txt *.md *.pptx);;"
@@ -964,17 +967,35 @@ class IconButton(QPushButton):
 
 
 class ArcLogo(QWidget):
-    """The small arc-reactor mark at the left of the header."""
+    """The application logo mark at the left of the header."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(34, 34)
+        self._pixmap = None
+        _png = CONFIG_DIR / "openagent.png"
+        if not _png.exists():
+            _png = CONFIG_DIR / "jarvis.png"
+        if _png.exists():
+            pm = QPixmap(str(_png))
+            if not pm.isNull():
+                self._pixmap = pm.scaled(
+                    30, 30,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
 
     def paintEvent(self, _):
         p = QPainter(self)
         if not p.isActive():
             return
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._pixmap and not self._pixmap.isNull():
+            x = (self.width() - self._pixmap.width()) // 2
+            y = (self.height() - self._pixmap.height()) // 2
+            p.drawPixmap(x, y, self._pixmap)
+            p.end()
+            return
         cx = cy = 17
         g = QRadialGradient(cx, cy, 16)
         g.setColorAt(0, with_alpha(C.PRI, 0.55))
@@ -994,6 +1015,9 @@ class ArcLogo(QWidget):
         p.setPen(QPen(qcol(C.PRI), 1))
         p.drawEllipse(QPointF(cx, cy), 4, 4)
         p.end()
+
+
+AppLogo = ArcLogo
 
 
 class StateChip(QWidget):

@@ -236,8 +236,13 @@ def _format_text_report(
     return_date: str | None,
     page_url:    str,
 ) -> str:
+    try:
+        from memory.config_manager import get_assistant_name
+        asst = get_assistant_name().upper()
+    except Exception:
+        asst = "JARVIS"
     lines = [
-        "JARVIS — Flight Search Results",
+        f"{asst} — Flight Search Results",
         "─" * 50,
         f"Route     : {origin} → {destination}",
         f"Date      : {date}",

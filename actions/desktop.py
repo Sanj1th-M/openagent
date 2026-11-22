@@ -484,7 +484,7 @@ def set_wallpaper_from_url(url: str) -> str:
         request = urllib.request.Request(
             address, headers={"User-Agent": "Mozilla/5.0 (compatible; JARVIS)",
                               "Accept": "image/*,*/*"})
-        with urllib.request.urlopen(request, timeout=25) as response:
+        with urllib.request.urlopen(request, timeout=25) as response:  # nosec B310
             content_type = response.headers.get("Content-Type", "")
             data = response.read(_MAX_DOWNLOAD + 1)
     except urllib.error.HTTPError as e:

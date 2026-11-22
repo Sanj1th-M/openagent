@@ -122,8 +122,11 @@ def is_configured() -> bool:
 
 
 def get_assistant_name() -> str:
-    """Return the configured assistant name, or 'JARVIS' if not set."""
-    return load_api_keys().get("assistant_name", "JARVIS") or "JARVIS"
+    """Return the configured assistant name, or 'Jarvis' if not set."""
+    val = load_api_keys().get("assistant_name", "Jarvis")
+    if not isinstance(val, str) or not val.strip():
+        return "Jarvis"
+    return val.strip()
 
 
 def get_user_name() -> str:
@@ -136,7 +139,7 @@ def save_assistant_config(assistant_name: str, user_name: str) -> None:
     """Persist assistant name and user name to config."""
     ensure_config_dir()
     data = _read_for_write()
-    data["assistant_name"] = assistant_name.strip() or "JARVIS"
+    data["assistant_name"] = assistant_name.strip() or "Jarvis"
     data["user_name"] = user_name.strip()
     _write_config(data)
 

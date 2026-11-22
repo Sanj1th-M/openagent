@@ -1,7 +1,5 @@
-# ⚙️ MARK LVII (57)
-### The Ultimate Cross-Platform Personal AI Assistant — By FatihMakes
-
-> 📺 **[Watch the full setup video on YouTube](https://www.youtube.com/@FatihMakes)**
+# ⚙️ openagent
+### The Ultimate Cross-Platform Personal AI Assistant — By sanj1th
 
 A real-time voice AI that can hear, see, speak, and control your computer — on any OS. Supports Windows, macOS, and Linux. Built on the Gemini Live API for native audio streaming, delivering zero subscriptions and total digital autonomy.
 
@@ -9,7 +7,7 @@ A real-time voice AI that can hear, see, speak, and control your computer — on
 
 ## ✨ Overview
 
-Mark LVI let you choose what runs the assistant. **Mark LVII gives it work that
+Choose what runs the assistant. **openagent gives it work that
 carries on while you are not watching.**
 
 Say *"research this for ten minutes"* or *"tonight at two, compare these three"*
@@ -33,11 +31,11 @@ routines use only what the app already had.
 
 ---
 
-## 📦 Mark LVI, in short
+## 📦 Flexible AI Engines, in short
 
 Until now this was a Gemini assistant, and only that. If you had no quota left, no
 connection, or a rule that says your microphone does not leave the building, you
-had no assistant. Mark LVI adds a second way to hold the conversation — speech
+had no assistant. openagent adds a second way to hold the conversation — speech
 recognition, a language model and a voice, assembled from parts you pick in
 ⚙ → **ENGINE & PROVIDERS** — and a way to point the assistant's own background
 requests at a different model without touching the voice at all.
@@ -56,7 +54,7 @@ inherits the avatar, the lip-sync, the self-echo guard, push-to-talk, the wake
 word, memory, undo, the confirmation gate and every action and plugin — because
 it enters through the same door the Live session always did.
 
-Mark LVI also changes what the assistant is allowed to CLAIM. Every tool that
+openagent also changes what the assistant is allowed to CLAIM. Every tool that
 drives an application now answers with what it observed rather than with what it
 attempted: `done` means it was checked, `unverified` means the request went out
 and could not be confirmed — and the assistant says exactly that instead of
@@ -145,7 +143,7 @@ It's not just an assistant — it's an extension of your digital life.
 
 ---
 
-## 🆕 What's New in Mark LVII
+## 🆕 What's New in openagent
 
 No new dependency. Everything below is built from what the app already had: the
 Gemini ladder, the DuckDuckGo search the web tool already used, and PyQt.
@@ -154,7 +152,7 @@ Gemini ladder, the DuckDuckGo search the web tool already used, and PyQt.
 
 A voice assistant is bad at long work for one reason: the conversation is the only
 place anything happens, and a conversation cannot sit on one question for ten
-minutes. Mark LVII gives long work its own place.
+minutes. openagent gives long work its own place.
 
 *"Research the best budget 3D printers for ten minutes"* — the assistant says in one
 sentence that it has started, and you carry on talking. *"Tonight at 02:00, compare
@@ -201,7 +199,7 @@ full, no finding resting on a snippet.
 
 ### 🗓️ Routines
 
-Before this Mark, the same idea was written four times by hand: a briefing fired at
+Previously, the same idea was written four times by hand: a briefing fired at
 connect, a check-in on a fifteen-minute timer, a news watch on a thirty-minute loop,
 and reminders that were only ever a system notification. A routine is the shape
 they share — **when**, and **what**:
@@ -238,7 +236,7 @@ when it next happens, a switch to turn each one off.
 `ui.py` was a single 6,484-line file. It is now the `gui/` package — theme, metrics,
 HUD, widgets, overlays, providers panel, window, style and reactor — and `ui.py`
 keeps `JarvisUI` and **re-exports every name it ever defined**, so every plugin
-written against an older Mark still imports what it imported.
+written against an older release still imports what it imported.
 
 The reactor core is a real 3-D projection — sphere, gyro rings, orbit and platform,
 depth-cued so the far side dims — drawn with QPainter and numpy. Static layers are
@@ -280,7 +278,7 @@ reach them.
 
 ---
 
-## 📦 Previously, in Mark LVI
+## 📦 Architecture: Multi-Provider & Local Engine Foundations
 
 **Nothing new is installed by default.** Talking to a model — local or hosted — uses `httpx`, which already ships with `google-genai`. The system's own voices need no Python package at all. Local speech recognition (`faster-whisper`) and the neural voice (`piper-tts`) are one-click installs from inside the panel, and are deliberately absent from `requirements.txt`: a fresh clone that only ever uses Gemini should not download several hundred megabytes for a feature it will not open.
 
@@ -602,7 +600,7 @@ Nothing is removed to get there. And `tier` — the per-file override that decid
 
 ---
 
-## 📦 Previously, in Mark LV
+## 📦 Architecture: HUD Video, Audio Probing & Desktop Polish
 
 One new dependency for the whole release — `yt-dlp`, and only to turn a YouTube page into something Qt can play.
 
@@ -662,7 +660,7 @@ That middle row is where the time was going. Only quota and 404 used to be coole
 #### 🧩 Everything bundled drives the computer
 The bundled skill list had grown to seventeen, and some of it was nobody's business but its author's. **Not everyone updates games; everyone opens applications.**
 
-Mark LV trims it to **twelve**, and every one of them does the same kind of thing: drive this machine. Applications, the browser, files, the desktop, the screen, the clock, the weather, the display. The rule is written into the project tree, so the next skill lands in the right folder without anyone having to ask.
+The bundled skill set trims it to **twelve**, and every one of them does the same kind of thing: drive this machine. Applications, the browser, files, the desktop, the screen, the clock, the weather, the display. The rule is written into the project tree, so the next skill lands in the right folder without anyone having to ask.
 
 This is not only tidiness. Every bundled skill is declared to the model on **every** connection, whether you ever use it or not. The declarations sent at startup dropped from **16,827 characters to 12,907** — roughly a thousand tokens off every session, and five fewer wrong tools for the model to reach for.
 
@@ -678,15 +676,15 @@ This is not only tidiness. Every bundled skill is declared to the model on **eve
 * JARVIS **answered the video's soundtrack.** The microphone now follows the video's sound.
 * Qt's multimedia backend printed an ffmpeg banner to the console on every play, containing the **signed streaming URL with the viewer's IP address in it**. Silenced at startup.
 * **Every launch paid 201 ms for a plugin nobody had asked to use.** Discovery executes every file in `plugins/`, and `youtube_video` imported `requests` and `youtube_transcript_api` at module scope. Deferring one of them would have saved nothing — the transcript library imports `requests` itself. Both are now checked with `find_spec`, which answers "is it installed?" without executing anything, and loaded on first use: **plugin discovery 211 ms → 39 ms**.
-* A plugin that needed a file from a **newer Mark** was rejected with *"pip install core"*. The loader could not tell this project's own packages from a third-party one, so it told people to install a same-named stranger from an index — wrong, and a supply-chain hazard dressed up as a fix. First-party names now say the app is behind the plugin and that there is nothing to install.
+* A plugin that needed a file from a **newer openagent release** was rejected with *"pip install core"*. The loader could not tell this project's own packages from a third-party one, so it told people to install a same-named stranger from an index — wrong, and a supply-chain hazard dressed up as a fix. First-party names now say the app is behind the plugin and that there is nothing to install.
 
-> Built on the Mark LI–LV foundation: the **🧑‍🎤 Holographic Avatar**, **👄 Lip-Sync**, **🎚️ Push-to-Talk**, **🔇 Self-Echo Guard**, **🧩 Plugin System**, **♾️ Unlimited Sessions**, **🎨 Live Theming** and **🎙️ Wake Word** are all still here.
+> Built on the openagent foundation: the **🧑‍🎤 Holographic Avatar**, **👄 Lip-Sync**, **🎚️ Push-to-Talk**, **🔇 Self-Echo Guard**, **🧩 Plugin System**, **♾️ Unlimited Sessions**, **🎨 Live Theming** and **🎙️ Wake Word** are all still here.
 
 ---
 
-## 🔄 The Foundation Update — in every Mark from LII
+## 🔄 The Foundation Update
 
-These four landed across **Mark LII, LIII, LIV and LV at the same time**, after each of those releases had already shipped. They are not what any one of those versions originally introduced; they are the floor all of them now stand on, so moving up a Mark never costs you something the one below it had.
+These core capabilities landed together across development releases, creating the unified floor all versions stand on, so updating to newer releases never costs you something an earlier one had.
 
 No new dependencies. No bundled asset files. No hardcoded language, and nothing that assumes one operating system.
 
@@ -781,9 +779,9 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 
 ---
 
-## 🗺️ Mark Roadmap
+## 🗺️ Release Roadmap
 
-| Mark | Focus |
+| Release | Focus |
 |---|---|
 | **XLIX** | Auto-start · clipboard intelligence · assistant customization |
 | **L** | Session memory · background monitoring · proactive 2.0 · instant vision |
@@ -793,17 +791,17 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 | **LIV** | Holographic avatar · viseme lip-sync · facial acting · face-as-status · push-to-talk · self-echo guard · runtime self-knowledge & limits |
 | **LV** | Video on the HUD · model ladder with measured fallback · split settings drawers · trimmed bundled skill list |
 | **LVI** | Choose your engine · local & third-party models · Whisper + Piper in ~50 languages · language-following voice · ElevenLabs · tool budget for small models · verified outcomes instead of claimed ones · close an app by name · untrusted-content boundary · platform honesty on Wayland and macOS · hardened phone dashboard |
-| *shared* | The last five above also shipped to LIII, LIV and LV at the same time — moving up a Mark never loses them |
-| **LVII** | Background tasks · agents as files · deep research with quotes checked in code · one routine engine for briefing, check-ins, news watch and reminders · quiet hours · command-center HUD · 3-D reactor core · re-measured model ladder |
-| **LVIII+** | MCP tools · an approval policy for actions · event-driven proactivity · a knowledge folder · conversation history · interrupt by voice |
+| *shared* | Unified foundation capabilities maintained across all releases |
+| **LVII (openagent)** | Background tasks · agents as files · deep research with quotes checked in code · one routine engine for briefing, check-ins, news watch and reminders · quiet hours · command-center HUD · 3-D reactor core · re-measured model ladder |
+| **Next** | MCP tools · an approval policy for actions · event-driven proactivity · a knowledge folder · conversation history · interrupt by voice |
 
 ---
 
 ## ⚡ Quick Start
 
 ```bash
-git clone https://github.com/FatihMakes/Mark-LVII.git
-cd Mark-LVII
+git clone https://github.com/Sanj1th-M/openagent.git
+cd openagent
 python setup.py        # installs deps for YOUR OS + the browser automation engine
 python main.py
 ```
@@ -837,7 +835,7 @@ python main.py
 ## 🗂️ Project Structure
 
 ```
-Mark LVII/
+openagent/
 ├── main.py                   # Core loop — Gemini Live session, audio I/O, viseme extraction, tool dispatch
 ├── ui.py                     # JarvisUI — what main.py builds and plugins receive as `player`;
 │                             #   re-exports every name the old single-file ui.py defined
@@ -988,7 +986,7 @@ Mark LVII/
 
 ## 🔒 Your Data
 
-Everything stays on your machine. There is no MARK server, no telemetry and no account.
+Everything stays on your machine. There is no openagent server, no telemetry and no account.
 
 | What | Where | Notes |
 |---|---|---|
@@ -1003,23 +1001,21 @@ All of them are listed in `.gitignore`, so a fork or a pull request cannot leak 
 
 Your voice is streamed to Google's Gemini Live API while a session is open; that is the one thing that leaves your computer, and it stops when you mute or close the app.
 
-**Mark LVI changes what that sentence can say about you.** Choose a local engine — Whisper on your CPU, a model served by Ollama or LM Studio, your system's own voice — and nothing leaves the machine at all: no audio, no transcript, no key, no account. Choose a hosted provider instead and your audio and text go to that vendor rather than to Google. The panel says which is which, and the assistant never quietly switches between them.
+**openagent gives you complete control over what that sentence can say about you.** Choose a local engine — Whisper on your CPU, a model served by Ollama or LM Studio, your system's own voice — and nothing leaves the machine at all: no audio, no transcript, no key, no account. Choose a hosted provider instead and your audio and text go to that vendor rather than to Google. The panel says which is which, and the assistant never quietly switches between them.
 
 ---
 
-## ⚠️ License
+## ⚠️ License & Attribution
 
 Personal and non-commercial use only.
 Licensed under **[Creative Commons BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)**.
 
+This project is adapted from upstream work originally created and published by FatihMakes.
+
 ---
 
-## 👤 Connect with the Creator
+## 👤 Project Maintainer
 
-Engineered by a developer building a real-world JARVIS-style assistant.
-⭐ **Star the repository to support the journey to Mark 100.**
+Maintained and adapted by Sanj1th.
 
-| Platform | Link |
-| --- | --- |
-| YouTube | [@FatihMakes](https://www.youtube.com/@FatihMakes) |
-| Instagram | [@fatihmakes](https://www.instagram.com/fatihmakes) |
+⭐ **Star the repository to support openagent development.**

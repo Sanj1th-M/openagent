@@ -100,11 +100,29 @@ def _apply_ui_scale() -> None:
 class JarvisUI:
     def __init__(self, face_path: str, size=None):
         _apply_ui_scale()
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("openagent.assistant")
+            except Exception:
+                pass
         self._app = QApplication.instance() or QApplication(sys.argv)
         self._app.setStyle("Fusion")
+        try:
+            from pathlib import Path
+            from PyQt6.QtGui import QIcon
+            ico = Path(__file__).resolve().parent / "config" / "openagent.ico"
+            if not ico.exists():
+                ico = Path(__file__).resolve().parent / "config" / "jarvis.ico"
+            if ico.exists():
+                self._app.setWindowIcon(QIcon(str(ico)))
+        except Exception:
+            pass
         self._win = MainWindow(face_path)
         self.root = _RootShim(self._app)
         self._win.show()
+        self._win.raise_()
+        self._win.activateWindow()
 
     @property
     def muted(self) -> bool:

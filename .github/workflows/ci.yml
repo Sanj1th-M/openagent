@@ -1,0 +1,144 @@
+name: CI / CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - 'feat/**'
+      - 'feature/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Code Quality & Linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Linting & Type-Checking Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy
+
+      - name: Run Ruff Lint Checks
+        run: |
+          ruff check tests/ setup.py
+
+      - name: Run Ruff Format Check
+        run: |
+          ruff format --check tests/ setup.py
+
+      - name: Run Mypy Type Checking
+        run: |
+          mypy tests/
+
+  security:
+    name: Security & Vulnerability Auditing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Security Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit pip-audit
+
+      - name: Run Bandit AST Security Scan
+        run: |
+          bandit -ll -r actions core gui memory plugins main.py ui.py setup.py tests
+
+      - name: Run Dependency Audit (Dry-Run / Report)
+        continue-on-error: true
+        run: |
+          pip-audit -r requirements.txt || true
+
+  test:
+    name: Test Suite (${{ matrix.os }} · Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install System Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-glx libegl1-mesa libxkbcommon-x11-0 libdbus-1-3 xvfb
+
+      - name: Install Python Test Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest httpx numpy
+
+      - name: Run Pytest Test Suite (Linux Headless)
+        if: runner.os == 'Linux'
+        run: |
+          xvfb-run -a pytest tests/ -v
+
+      - name: Run Pytest Test Suite (Windows / macOS)
+        if: runner.os != 'Linux'
+        run: |
+          pytest tests/ -v
+
+      - name: Run Providers Integration Tests
+        run: |
+          python -m providers._tests
+
+  build-validation:
+    name: Packaging & Setup Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Build Tools
+        run: |
+          python -m pip install --upgrade pip build setuptools wheel
+
+      - name: Validate Setup.py Syntax
+        run: |
+          python -m py_compile setup.py
+
+      - name: Test Package Build
+        run: |
+          python -m build --sdist

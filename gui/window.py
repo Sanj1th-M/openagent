@@ -23,7 +23,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QBrush, QColor, QConicalGradient, QDragEnterEvent, QDropEvent, QFont,
-    QFontDatabase, QKeySequence, QLinearGradient, QPainter, QPainterPath,
+    QFontDatabase, QIcon, QKeySequence, QLinearGradient, QPainter, QPainterPath,
     QPen, QPixmap, QRadialGradient, QShortcut,
 )
 from PyQt6.QtWidgets import (
@@ -124,7 +124,7 @@ class MainWindow(QMainWindow):
 
         # Load customization from config
         _cfg = _read_full_config()
-        self._assistant_name: str = (_cfg.get("assistant_name") or "JARVIS").strip()
+        self._assistant_name: str = (_cfg.get("assistant_name") or "Jarvis").strip()
         _display = self._assistant_name.upper()
 
         # Apply the saved UI colour BEFORE panels/stylesheets are built
@@ -132,7 +132,12 @@ class MainWindow(QMainWindow):
         if _ui_color and _ui_color.lower() != DEFAULT_UI_COLOR:
             apply_ui_accent(_ui_color)
 
-        self.setWindowTitle(f"{_display} — {APP_VERSION}")
+        self.setWindowTitle(APP_VERSION)
+        ico = CONFIG_DIR / "openagent.ico"
+        if not ico.exists():
+            ico = CONFIG_DIR / "jarvis.ico"
+        if ico.exists():
+            self.setWindowIcon(QIcon(str(ico)))
         self.setMinimumSize(_MIN_W, _MIN_H)
         self.resize(_DEFAULT_W, _DEFAULT_H)
 
@@ -786,10 +791,29 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _build_jarvis_icon(out_path: Path) -> bool:
         """
-        Render a JARVIS arc-reactor icon at 4× resolution and downsample
-        for crisp results at all sizes. Saves a multi-res .ico to out_path.
+        Render the openagent application icon. Downsamples from openagent.png if
+        available, or generates a fallback multi-res .ico to out_path.
         Returns True on success.
         """
+        try:
+            import PIL.Image
+            png_src = out_path.parent / "openagent.png"
+            if not png_src.exists():
+                png_src = out_path.parent / "jarvis.png"
+            if png_src.exists():
+                sizes = [256, 128, 64, 48, 32, 16]
+                src_img = PIL.Image.open(png_src).convert("RGBA")
+                frames = [src_img.resize((s, s), PIL.Image.LANCZOS) for s in sizes]
+                frames[0].save(
+                    out_path,
+                    format="ICO",
+                    append_images=frames[1:],
+                    sizes=[(s, s) for s in sizes],
+                )
+                return True
+        except Exception:
+            pass
+
         try:
             import math
             import PIL.Image
@@ -893,17 +917,19 @@ class MainWindow(QMainWindow):
         """
         # ── Option 1: pywin32 (pure Python COM, zero subprocess) ──────────
         try:
+            import pythoncom
+            pythoncom.CoInitialize()
             from win32com.client import Dispatch   # type: ignore
             sh = Dispatch("WScript.Shell")
             sc = sh.CreateShortCut(lnk)
             sc.TargetPath       = target
             sc.Arguments        = f'"{args}"'
             sc.WorkingDirectory = work_dir
-            sc.Description      = "J.A.R.V.I.S AI Assistant"
+            sc.Description      = "openagent AI Assistant"
             sc.IconLocation     = icon_loc
             sc.save()
             return
-        except ImportError:
+        except Exception:
             pass
 
         # ── Option 2: wscript.exe + VBScript (always available on Windows,
@@ -914,7 +940,7 @@ class MainWindow(QMainWindow):
             f'sc.TargetPath = "{target}"',
             f'sc.Arguments = Chr(34) & "{args}" & Chr(34)',
             f'sc.WorkingDirectory = "{work_dir}"',
-            'sc.Description = "J.A.R.V.I.S AI Assistant"',
+            'sc.Description = "openagent AI Assistant"',
             f'sc.IconLocation = "{icon_loc}"',
             'sc.Save',
         ])
@@ -1025,8 +1051,10 @@ class MainWindow(QMainWindow):
         python  = Path(sys.executable)
         desktop = self._get_desktop_dir()
 
-        # Arc-reactor icon (.ico — also exported as .png for Linux/macOS)
-        ico_path = Path(__file__).resolve().parent.parent / "config" / "jarvis.ico"
+        # Application icon (.ico — also exported as .png for Linux/macOS)
+        ico_path = CONFIG_DIR / "openagent.ico"
+        if not ico_path.exists():
+            ico_path = CONFIG_DIR / "jarvis.ico"
         if not ico_path.exists():
             self._build_jarvis_icon(ico_path)
 
@@ -1037,14 +1065,14 @@ class MainWindow(QMainWindow):
             if _os == "Windows":
                 pythonw  = python.parent / "pythonw.exe"
                 target   = str(pythonw if pythonw.exists() else python)
-                lnk      = str(desktop / "J.A.R.V.I.S.lnk")
+                lnk      = str(desktop / "openagent.lnk")
                 icon_loc = str(ico_path) if ico_path.exists() else f"{target},0"
                 self._create_lnk_windows(lnk, target, str(script),
                                          str(script.parent), icon_loc)
 
             # ── macOS — proper .app bundle (no Terminal window) ───────────────
             elif _os == "Darwin":
-                app     = desktop / "J.A.R.V.I.S.app"
+                app     = desktop / "openagent.app"
                 mac_dir = app / "Contents" / "MacOS"
                 res_dir = app / "Contents" / "Resources"
                 mac_dir.mkdir(parents=True, exist_ok=True)
@@ -1052,7 +1080,7 @@ class MainWindow(QMainWindow):
 
                 # Launcher executable (bash — runs as background process,
                 # macOS does NOT open Terminal for executables inside .app bundles)
-                launcher = mac_dir / "JARVIS"
+                launcher = mac_dir / "openagent"
                 launcher.write_text(
                     "#!/usr/bin/env bash\n"
                     f'cd "{script.parent}"\n'
@@ -1067,10 +1095,10 @@ class MainWindow(QMainWindow):
                     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
                     '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
                     '<plist version="1.0"><dict>\n'
-                    '  <key>CFBundleExecutable</key><string>JARVIS</string>\n'
+                    '  <key>CFBundleExecutable</key><string>openagent</string>\n'
                     '  <key>CFBundleIdentifier</key>'
-                    '<string>com.jarvis.assistant</string>\n'
-                    '  <key>CFBundleName</key><string>J.A.R.V.I.S</string>\n'
+                    '<string>com.openagent.assistant</string>\n'
+                    '  <key>CFBundleName</key><string>openagent</string>\n'
                     '  <key>CFBundlePackageType</key><string>APPL</string>\n'
                     '  <key>CFBundleVersion</key><string>1.0</string>\n'
                     '</dict></plist>\n'
@@ -1096,8 +1124,10 @@ class MainWindow(QMainWindow):
 
             # ── Linux — .desktop file (Terminal=false, no console) ────────────
             else:
-                # Export .ico → .png for better desktop integration
-                png_path = ico_path.with_suffix(".png")
+                # Look for openagent.png or export .ico → .png for Linux desktop integration
+                png_path = CONFIG_DIR / "openagent.png"
+                if not png_path.exists():
+                    png_path = ico_path.with_suffix(".png")
                 if not png_path.exists() and ico_path.exists():
                     try:
                         import PIL.Image
@@ -1108,10 +1138,10 @@ class MainWindow(QMainWindow):
                         png_path = ico_path  # fallback to .ico
 
                 icon_line = f"Icon={png_path}\n" if png_path.exists() else ""
-                desk = desktop / "J.A.R.V.I.S.desktop"
+                desk = desktop / "openagent.desktop"
                 desk.write_text(
                     "[Desktop Entry]\n"
-                    "Name=J.A.R.V.I.S\n"
+                    "Name=openagent\n"
                     f"Exec={python} {script}\n"
                     f"Path={script.parent}\n"
                     "Type=Application\n"
@@ -2264,7 +2294,7 @@ class MainWindow(QMainWindow):
     def _build_footer(self) -> QWidget:
         self._status_strip = StatusStrip()
         self._status_strip.set_right(
-            "F4 MUTE   ·   F11 FULLSCREEN   ·   ESC INTERRUPT   ·   BY FATIHMAKES")
+            "F4 MUTE   ·   F11 FULLSCREEN   ·   ESC INTERRUPT   ·   BY SANJ1TH")
         self._refresh_status_strip()
         return self._status_strip
 
@@ -2642,7 +2672,7 @@ class MainWindow(QMainWindow):
             self._customize_overlay.hide()
         cw = self.centralWidget()
         ov = CustomizeOverlay(
-            cfg.get("assistant_name", "JARVIS") or "JARVIS",
+            cfg.get("assistant_name", "Jarvis") or "Jarvis",
             cfg.get("user_name", ""),
             cfg.get("ui_color", "") or DEFAULT_UI_COLOR,
             cfg.get("voice_name", ""),
@@ -2669,9 +2699,9 @@ class MainWindow(QMainWindow):
     def _apply_name_update(self, name: str, user_name: str, ui_color: str = "",
                            voice: str = ""):
         """Update all name/theme-dependent UI elements and persist to config."""
-        self._assistant_name = name.strip() or "JARVIS"
+        self._assistant_name = name.strip() or "Jarvis"
         display = self._assistant_name.upper()
-        self.setWindowTitle(f"{display} — {APP_VERSION}")
+        self.setWindowTitle(APP_VERSION)
         self._title_lbl.setText(display)
         self._title_lbl.setToolTip(self._subtitle(display))
         self._log._ai_name_lc = self._assistant_name.lower()
@@ -2954,7 +2984,7 @@ class MainWindow(QMainWindow):
             self._overlay.hide()
             self._overlay = None
         self._apply_state("LISTENING")
-        self._assistant_name = _read_full_config().get("assistant_name", "JARVIS") or "JARVIS"
+        self._assistant_name = _read_full_config().get("assistant_name", "Jarvis") or "Jarvis"
         self._log.append_log(f"SYS: Initialised. OS={os_name.upper()}. {self._assistant_name} online.")
 
 

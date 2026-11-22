@@ -288,7 +288,7 @@ class CustomizeOverlay(QWidget):
     saved = pyqtSignal(str, str, str, str)   # assistant_name, user_name, ui_color, voice
     _OW, _OH = 400, 588
 
-    def __init__(self, assistant_name="JARVIS", user_name="",
+    def __init__(self, assistant_name="Jarvis", user_name="",
                  ui_color=DEFAULT_UI_COLOR, voice="", parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -494,7 +494,7 @@ class CustomizeOverlay(QWidget):
         self.hide()
 
     def _save(self):
-        name = self._name_input.text().strip() or "JARVIS"
+        name = self._name_input.text().strip() or "Jarvis"
         user = self._user_input.text().strip()
         self.saved.emit(name, user, self._sel_color or DEFAULT_UI_COLOR, self._sel_voice)
         self.hide()
@@ -744,7 +744,7 @@ class AudioDeviceOverlay(_HudOverlay):
     def __init__(self, parent=None):
         super().__init__(parent)
         from core.audio_devices import list_devices, DEFAULT_LABEL
-        from memory.config_manager import get_input_device, get_output_device
+        from memory.config_manager import get_assistant_name, get_input_device, get_output_device
 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"""
@@ -864,10 +864,11 @@ class AudioDeviceOverlay(_HudOverlay):
         self._level_seen.connect(self._on_level)
         self._test_result.connect(self._on_result)
 
-        self._in_box  = _row("MICROPHONE — what JARVIS hears you with",
+        _asst = get_assistant_name()
+        self._in_box  = _row(f"MICROPHONE — what {_asst} hears you with",
                              "input", get_input_device())
         lay.addSpacing(4)
-        self._out_box = _row("SPEAKERS — what JARVIS talks through",
+        self._out_box = _row(f"SPEAKERS — what {_asst} talks through",
                              "output", get_output_device())
 
         # ── Output volume, beside the output device ──────────────────────────
@@ -1167,8 +1168,10 @@ class MemoryOverlay(_HudOverlay):
         self._clear_layout()
 
         from memory.memory_manager import all_entries_for_ui
+        from memory.config_manager import get_assistant_name
 
-        hdr = QLabel("🧠  WHAT JARVIS REMEMBERS")
+        _asst_u = get_assistant_name().upper()
+        hdr = QLabel(f"🧠  WHAT {_asst_u} REMEMBERS")
         hdr.setFont(hud_font(12, QFont.Weight.Bold))
         hdr.setStyleSheet(f"color: {C.PRI}; background: transparent;")
         self._lay.addWidget(hdr)
@@ -1866,7 +1869,9 @@ class RemoteKeyOverlay(QWidget):
         self._qr_label.setStyleSheet(
             "color: #00ff88; background: #001a0d; border-radius: 10px;"
         )
-        self._timer_lbl.setText("Phone connected — JARVIS ready")
+        from memory.config_manager import get_assistant_name
+        _asst_u = get_assistant_name().upper()
+        self._timer_lbl.setText(f"Phone connected — {_asst_u} ready")
         self._timer_lbl.setStyleSheet(f"color: {C.GREEN}; background: transparent;")
 
     def _refresh_key(self):

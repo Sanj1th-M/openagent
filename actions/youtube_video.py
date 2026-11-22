@@ -174,13 +174,19 @@ def _summarize_with_gemini(transcript: str, video_url: str) -> str:
     truncated = transcript[:max_chars] + ("..." if len(transcript) > max_chars else "")
     # A whole transcript can be 80k characters, hence the long deadline — but a
     # deadline there is, and the ladder in core/gemini.py picks the model.
+    try:
+        from memory.config_manager import get_assistant_name
+        asst = get_assistant_name()
+    except Exception:
+        asst = "Jarvis"
+
     response = gemini.call(
         f"Please summarize this YouTube video transcript:\n\n{truncated}",
         tier=gemini.SMART,
         timeout_ms=60_000,
         config=types.GenerateContentConfig(
             system_instruction=(
-                "You are JARVIS, an AI assistant. "
+                f"You are {asst}, an AI assistant. "
                 "Summarize YouTube video transcripts clearly and concisely. "
                 "Structure: 1-sentence overview, then 3-5 key points. "
                 "Be direct. Address the user as 'sir'. "
@@ -200,8 +206,14 @@ def _save_summary(content: str, video_url: str) -> str:
     desktop.mkdir(parents=True, exist_ok=True)
     filepath = desktop / filename
 
+    try:
+        from memory.config_manager import get_assistant_name
+        asst_u = get_assistant_name().upper()
+    except Exception:
+        asst_u = "JARVIS"
+
     header = (
-        f"JARVIS — YouTube Summary\n"
+        f"{asst_u} — YouTube Summary\n"
         f"{'─' * 50}\n"
         f"URL    : {video_url}\n"
         f"Date   : {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"

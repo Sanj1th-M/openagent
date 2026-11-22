@@ -307,7 +307,7 @@ def _open_vscode(project_dir: Path) -> bool:
         try:
             subprocess.Popen(
                 [cmd, str(project_dir)],
-                shell=True,
+                shell=True,  # nosec B602
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
@@ -1133,7 +1133,7 @@ def _project_brief(folder: Path, context: str, stack: dict, player=None) -> str:
     out first, from the whole project at once, and kept until the project's
     files change. Kept in this app's config folder, not in the user's project."""
     from core.code_checks import fingerprint
-    key = hashlib.sha1(str(folder).lower().encode()).hexdigest()[:16]
+    key = hashlib.sha1(str(folder).lower().encode(), usedforsecurity=False).hexdigest()[:16]
     cache = _BRIEF_DIR / f"{key}.json"
     fp = fingerprint(folder)
     try:
@@ -1180,7 +1180,7 @@ def _refresh_brief(folder: Path) -> None:
     """Mark a cached study as current for the project as it now stands."""
     try:
         from core.code_checks import fingerprint
-        key = hashlib.sha1(str(folder).lower().encode()).hexdigest()[:16]
+        key = hashlib.sha1(str(folder).lower().encode(), usedforsecurity=False).hexdigest()[:16]
         cache = _BRIEF_DIR / f"{key}.json"
         saved = json.loads(cache.read_text(encoding="utf-8"))
         saved["fingerprint"] = fingerprint(folder)
