@@ -1030,22 +1030,23 @@ def test_panel_settings_survive():
                          "tts": "elevenlabs@elevenlabs"})
         ov._rebuild_body()
 
-        import pathlib
+        from memory import config_manager
+
         writes = [0]
-        real = pathlib.Path.write_text
+        real = config_manager.os.replace
 
-        def counted(self, *a, **k):
-            # The config is written to api_keys.json.tmp and moved into place
-            # in one step (memory/config_manager.py), so either name is a write.
-            if self.name in ("api_keys.json", "api_keys.json.tmp"):
+        def counted(src, dst, *a, **k):
+            # Count the atomic replacement of the settings file. Its secure
+            # temporary filename is intentionally randomized by mkstemp.
+            if Path(dst) == config_manager.CONFIG_FILE:
                 writes[0] += 1
-            return real(self, *a, **k)
+            return real(src, dst, *a, **k)
 
-        pathlib.Path.write_text = counted
+        config_manager.os.replace = counted
         try:
             ov._apply()
         finally:
-            pathlib.Path.write_text = real
+            config_manager.os.replace = real
 
         check("APPLY writes the config once", writes[0] == 1, str(writes[0]))
         check("the mode was stored", get_provider_mode() == "pipeline",
