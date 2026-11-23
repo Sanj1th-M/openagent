@@ -28,6 +28,8 @@ else:
 # paste into bug reports. Silenced here, before Qt initialises its logging.
 # An explicit setting from the user is left alone.
 os.environ.setdefault("QT_LOGGING_RULES", "qt.multimedia.*=false")
+if platform.system() == "Linux" and not os.environ.get("DISPLAY"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import (
     QEasingCurve, QLineF, QMimeData, QObject, QParallelAnimationGroup, QPointF,

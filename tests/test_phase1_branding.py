@@ -4,9 +4,12 @@ Product Identity: openagent
 Default Agent Identity: Jarvis (user-customizable)
 """
 
+import os
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from gui import theme
 from memory import config_manager

@@ -54,10 +54,19 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
-import sounddevice as sd
+try:
+    import sounddevice as sd
+except Exception:
+    sd = None
+
 import numpy as np
-from google import genai
-from google.genai import types
+
+try:
+    from google import genai
+    from google.genai import types
+except Exception:
+    genai = None
+    types = None
 from ui import JarvisUI
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
