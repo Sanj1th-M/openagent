@@ -730,6 +730,17 @@ def _update(status: str | None = None, file: str | None = None,
 
 
 def _log(player, msg: str) -> None:
+    # Task logs can include model errors or user supplied instructions. Keep
+    # common credential forms out of the console, activity panel and snapshots.
+    msg = str(msg)
+    msg = re.sub(
+        r"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|credential)"
+        r"(\s*[:=]\s*)([^\s,;]+)",
+        r"\1\2[REDACTED]", msg,
+    )
+    msg = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", msg)
+    msg = re.sub(r"\bAIza[0-9A-Za-z_-]{20,}\b", "[REDACTED]", msg)
+    msg = re.sub(r"\bsk-[A-Za-z0-9_-]{16,}\b", "[REDACTED]", msg)
     try:
         print(f"[DevAgent] {msg}")
     except UnicodeEncodeError:       # a console on a legacy code page

@@ -12,6 +12,7 @@ Install deps:  pip install fastapi "uvicorn[standard]" cryptography
 import asyncio
 import base64
 import hashlib
+import json
 import re
 import secrets
 import socket
@@ -59,6 +60,20 @@ STATIC_DIR  = Path(__file__).parent / "static"
 PORT        = 8000      # HTTP, redirects to SECURE_PORT
 SECURE_PORT = 8001      # HTTPS, the dashboard itself
 MAX_UPLOAD_MB = 500
+
+
+def _script_json(value: str) -> str:
+    """Serialize a string for an inline script without allowing HTML breakout."""
+    return (json.dumps(value).replace("&", "\\u0026").replace("<", "\\u003c")
+            .replace(">", "\\u003e").replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029"))
+
+
+def _https_redirect_target(request_url, local_ip: str) -> str:
+    """Preserve the requested path while fixing the redirect authority locally."""
+    return str(request_url.replace(
+        scheme="https", netloc=f"{local_ip}:{SECURE_PORT}"
+    ))
 
 
 def _make_uploads_dir() -> Path:
@@ -963,9 +978,9 @@ class DashboardServer:
 </style></head>
 <body>
 <script>
-  sessionStorage.setItem('jarvis_token','{tok}');
-  sessionStorage.setItem('jarvis_key','{key}');
-  localStorage.setItem('jarvis_device_token','{dev_tok}');
+  sessionStorage.setItem('jarvis_token',{_script_json(tok)});
+  sessionStorage.setItem('jarvis_key',{_script_json(key)});
+  localStorage.setItem('jarvis_device_token',{_script_json(dev_tok)});
   setTimeout(function(){{location.replace('/')}},400);
 </script>
 <p>Connecting to JARVIS…</p>
@@ -1116,7 +1131,10 @@ class DashboardServer:
                         dest.unlink(missing_ok=True)
                     except Exception:
                         pass
-                    return JSONResponse({"error": str(exc)}, status_code=500)
+                    # Keep filesystem details in the local process log only by
+                    # type; the authenticated client does not need the raw error.
+                    print(f"[Dashboard] Upload failed ({type(exc).__name__})")
+                    return JSONResponse({"error": "Upload failed"}, status_code=500)
 
                 asyncio.create_task(self.broadcast({
                     "type": "file_received",
@@ -1155,8 +1173,18 @@ class DashboardServer:
             tok = token.strip()
             if not _valid(tok):
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
-            safe = re.sub(r'[/\\]', '', filename)
-            path = self._uploads_dir / safe
+            safe = filename
+            if (not safe or safe in {".", ".."} or Path(safe).name != safe
+                    or any(ch in safe for ch in '<>:"/\\|?*')
+                    or any(ord(ch) < 32 for ch in safe)
+                    or safe.endswith((".", " "))):
+                return JSONResponse({"error": "Not found"}, status_code=404)
+            root = self._uploads_dir.resolve()
+            path = (root / safe).resolve()
+            try:
+                path.relative_to(root)
+            except ValueError:
+                return JSONResponse({"error": "Not found"}, status_code=404)
             if not path.exists() or not path.is_file():
                 return JSONResponse({"error": "Not found"}, status_code=404)
             return FileResponse(str(path), filename=safe)
@@ -1217,10 +1245,12 @@ class DashboardServer:
         bounce = FastAPI(docs_url=None, redoc_url=None)
 
         @bounce.get("/{path:path}")
-        async def _to_https(path: str, request: Request):
-            query = f"?{request.url.query}" if request.url.query else ""
+        async def _to_https(request: Request):
+            # Keep the request path and query, but pin the destination authority
+            # to the local HTTPS listener instead of interpolating path text.
+            target = _https_redirect_target(request.url, self._ip)
             return RedirectResponse(
-                f"https://{self._ip}:{SECURE_PORT}/{path}{query}",
+                target,
                 status_code=307)
 
         cfg = uvicorn.Config(bounce, host="0.0.0.0", port=PORT,

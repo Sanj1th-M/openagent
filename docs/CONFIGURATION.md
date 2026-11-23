@@ -13,7 +13,7 @@ config/api_keys.json
 
 ### Key Architectural Tenets:
 1. **Single Source of Truth**: All configurations reside in one JSON file, making backup, export, and migration straightforward.
-2. **Atomic Writes**: Managed by `memory/config_manager.py`. Configuration updates are written to `config/api_keys.json.tmp` and atomically replaced using `os.replace`. This eliminates race conditions and file corruptions across concurrent threads.
+2. **Atomic Writes**: Managed by `memory/config_manager.py`. Configuration updates are written to a same-directory temporary file and atomically replaced using `os.replace`. On POSIX, the config directory and file are restricted to the current user. This eliminates race conditions and file corruptions across concurrent threads.
 3. **Automatic Backup**: If `config/api_keys.json` is corrupted (e.g. by manual editing errors), it is automatically preserved as `config/api_keys.json.broken-<timestamp>` rather than overwritten, protecting user keys.
 4. **Git Protection**: `config/api_keys.json` is strictly ignored by version control in `.gitignore`. **Never commit actual API keys or secrets.**
 

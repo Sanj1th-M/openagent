@@ -794,20 +794,20 @@ def call(contents, tier: str = FAST, config=None,
             msg = str(e)
             if is_key_error(msg) and not model.startswith(PROVIDER_PREFIX):
                 key_refused = True
-                print(f"[Gemini] the API key was refused — {msg[:120]}")
+                print("[Gemini] the API key was refused")
             elif is_quota_error(msg):
                 _cool(model)
-                print(f"[Gemini] {model}: out of quota — skipping it for "
+                print("[Gemini] model out of quota — skipping it for "
                       f"{_COOLDOWN_SECONDS // 60} minutes")
             elif is_gone_error(msg):
                 _cool(model, _GONE_SECONDS)
-                print(f"[Gemini] {model}: unavailable to this key — set aside")
+                print("[Gemini] model unavailable to this key — set aside")
             elif is_unavailable_error(msg):
                 _cool(model, _UNAVAILABLE_SECONDS)
-                print(f"[Gemini] {model}: not answering — resting it for "
+                print("[Gemini] model not answering — resting it for "
                       f"{_UNAVAILABLE_SECONDS // 60} minutes")
             else:
-                print(f"[Gemini] {model}: {type(e).__name__}: {msg[:140]}")
+                print(f"[Gemini] request failed ({type(e).__name__})")
     return None
 
 

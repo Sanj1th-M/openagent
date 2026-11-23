@@ -91,8 +91,7 @@ ddgs>=9,<10                  # web_search — the maintained successor to
                              # duckduckgo-search, which is tried first and
                              # falls back to the old name automatically
 pdfplumber                   # file_processor — PDF text and tables
-pypdf                        # file_processor — maintained PDF fallback reader
-PyPDF2                       # file_processor — legacy PDF fallback reader
+pypdf>=3.9.0                 # file_processor — maintained, patched PDF fallback reader
 python-docx                  # file_processor — .docx reading
 pynvml                       # system_monitor + the HUD's GPU meter (NVIDIA)
 

@@ -78,16 +78,16 @@ When processing external web content, search summaries, or third-party files:
 - **Cryptographic Key Derivation**: The 8-character pairing code is strengthened using **PBKDF2-HMAC-SHA256 with 200,000 iterations** (`dashboard/server.py`).
 - **AES-256-GCM Command Cipher vs. HTTPS Response Transport**: The browser applies AES-256-GCM to client-to-server command payloads only after Web Crypto successfully derives the 256-bit key from the pairing material. If key derivation or encryption is unavailable, the client falls back to sending the command in the `text` field without the additional payload cipher. When HTTPS is active, TLS still protects that request in transit; when the server is using its plain-HTTP fallback, neither TLS nor the secure-context Web Crypto command cipher should be assumed. Server-to-client responses and broadcast updates (`send_json`) are sent directly over the WebSocket and rely on HTTPS transport for in-transit protection when HTTPS is active; they do not receive the additional command AES-GCM payload wrapping.
 - **Rate Limiting & Token Expiration**: The `/login` endpoint rate limits failed authentication attempts (lockout after 6 failed tries), and session tokens expire automatically.
-- **Upload Sanitization**: Uploaded files are restricted to `MAX_UPLOAD_MB = 500` and written strictly to designated upload directories. Path traversal characters (`../`) are stripped.
+- **Upload Sanitization**: Uploaded files are restricted to `MAX_UPLOAD_MB = 500` and written to the configured upload directory. Downloads reject path separators and invalid filename characters, resolve the target path, and require it to remain under the resolved upload directory; symlink targets outside that directory are rejected.
 
 ---
 
 ## 3. Credential & Secrets Management
 
-- **Local Storage**: API credentials reside exclusively on local disk at `config/api_keys.json`.
+- **Local Storage**: API credentials reside on local disk at `config/api_keys.json`. On POSIX, the config directory and atomically replaced config file are restricted to the current user (`0700` and `0600`). On Windows, the config file inherits the ACL of its parent directory. Values remain plaintext for compatibility with the existing single-file backup and settings design; filesystem permissions do not protect against the current account or offline disk access.
 - **Zero Hardcoded Secrets**: No API keys, tokens, or default passwords are baked into source code.
 - **Git Shield**: `config/api_keys.json` is registered in `.gitignore`.
-- **Atomic File Serialization**: Uses `.tmp` files with `os.replace` to prevent race-condition data leakage or configuration wiping.
+- **Atomic File Serialization**: Uses a same-directory temporary file with `os.replace` to prevent race-condition data leakage or configuration wiping. Temporary files are created with owner-only POSIX permissions before the replacement.
 
 ---
 

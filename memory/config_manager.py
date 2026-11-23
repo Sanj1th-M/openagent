@@ -1,7 +1,9 @@
 import functools
 import json
 import os
+import stat
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -17,6 +19,10 @@ CONFIG_FILE = CONFIG_DIR / "api_keys.json"
 
 def ensure_config_dir() -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        # API and plugin credentials live here. Do not inherit a permissive
+        # umask from the process when creating the settings directory.
+        os.chmod(CONFIG_DIR, stat.S_IRWXU)
 
 def config_exists() -> bool:
     return CONFIG_FILE.exists()
@@ -48,18 +54,30 @@ def _locked(fn):
 
 def _write_config(data: dict) -> None:
     ensure_config_dir()
-    tmp = CONFIG_FILE.with_name(CONFIG_FILE.name + ".tmp")
-    tmp.write_text(json.dumps(data, indent=4), encoding="utf-8")
-    for attempt in range(20):
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{CONFIG_FILE.name}.", suffix=".tmp",
+                                    dir=CONFIG_DIR)
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, indent=4)
+        # Restrict access before the temporary file is atomically installed.
+        # On POSIX this is owner-only; Windows retains the parent directory ACL.
+        os.chmod(tmp, stat.S_IREAD | stat.S_IWRITE)
+        for attempt in range(20):
+            try:
+                os.replace(tmp, CONFIG_FILE)
+                return
+            except PermissionError:
+                # Windows: an antivirus scan or a reader can hold the file for a
+                # moment. Worth a short wait, never a lost setting.
+                if attempt == 19:
+                    raise
+                time.sleep(0.05)
+    finally:
         try:
-            os.replace(tmp, CONFIG_FILE)
-            return
-        except PermissionError:
-            # Windows: an antivirus scan or a reader can hold the file for a
-            # moment. Worth a short wait, never a lost setting.
-            if attempt == 19:
-                raise
-            time.sleep(0.05)
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _read_for_write() -> dict:

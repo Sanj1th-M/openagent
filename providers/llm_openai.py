@@ -29,11 +29,12 @@ WHAT IS DELIBERATELY NOT HERE
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import time
-import contextlib
 from importlib.util import find_spec
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator
+from urllib.parse import urlsplit
 
 from .base import DEFAULT_CAPS, Field, FunctionCall
 
@@ -195,6 +196,14 @@ def _normalise(url: str) -> str:
     if not path:
         url += "/v1"
     return url
+
+
+def _uses_host(url: str, hostname: str) -> bool:
+    """Match a provider by parsed hostname, never by an attacker-controlled substring."""
+    try:
+        return urlsplit(url).hostname == hostname
+    except ValueError:
+        return False
 
 
 def _int_or(value, default):
@@ -360,7 +369,7 @@ class OpenAICompatLLM:
         self.base = _normalise(cfg.get("base_url") or "")
         self.model = (cfg.get("model") or "").strip()
         self.key = (cfg.get("api_key") or "").strip()
-        if not self.key and "generativelanguage.googleapis.com" in self.base:
+        if not self.key and _uses_host(self.base, "generativelanguage.googleapis.com"):
             # The Gemini entry needs no second key: the one Gemini Live already
             # uses is the natural choice, and a different key pasted here is how
             # a free-tier project ends up behind a paid one (20 requests a day).
@@ -430,13 +439,13 @@ class OpenAICompatLLM:
             body["tool_choice"] = "auto"
         if temperature is not None:
             body["temperature"] = temperature
-        if "generativelanguage.googleapis.com" in self.base and "flash" in self.model:
+        if _uses_host(self.base, "generativelanguage.googleapis.com") and "flash" in self.model:
             # Gemini 3 Flash models think before every answer unless told not
             # to, which is most of their wait in a spoken turn. Measured
             # 2026-11-04: 3.5-flash first word ~2.4 s -> ~1.6 s at "low";
             # the Lite models answer as well with no thinking at all.
             body["reasoning_effort"] = "none" if "lite" in self.model else "low"
-        if "minimax" in self.base:
+        if _uses_host(self.base, "api.minimax.io"):
             # MiniMax's M2 models put their thinking inline as <think>…</think>
             # unless asked not to. The pipeline filters that out of speech, but
             # `complete()` feeds background requests that have no such filter —
@@ -541,7 +550,7 @@ class OpenAICompatLLM:
     async def _open_stream(self, cl, body: dict):
         """POST the streaming request; on Gemini, step past a model that is
         out of quota or overloaded before anything has been said."""
-        gemini = "generativelanguage.googleapis.com" in self.base
+        gemini = _uses_host(self.base, "generativelanguage.googleapis.com")
         models = self._gemini_order() if gemini else [body.get("model")]
         last = ""
         for model in models:
