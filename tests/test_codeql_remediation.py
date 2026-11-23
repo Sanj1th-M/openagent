@@ -52,12 +52,12 @@ def test_download_rejects_symlink_outside_upload_root(tmp_path):
     assert response.status_code == 404
 
 
-@pytest.mark.skipif(
-    not dashboard_server._UPLOAD_OK, reason="python-multipart is required for upload routes"
-)
 def test_upload_does_not_return_filesystem_exception_details(tmp_path):
     from starlette.requests import Request
 
+    assert dashboard_server._UPLOAD_OK, (
+        "python-multipart must be installed for dashboard upload routes"
+    )
     dashboard = dashboard_server.DashboardServer()
     dashboard._uploads_dir = tmp_path / "uploads"
     dashboard._uploads_dir.mkdir()
