@@ -185,12 +185,22 @@ def _normalise(url: str) -> str:
         return ""
     if "://" not in url:
         url = "http://" + url
-    scheme, _, rest = url.partition("://")
-    host, slash, path = rest.partition("/")
-    if host.split(":")[0].lower() == "localhost":
-        port = host.partition(":")[2]
-        host = "127.0.0.1" + (f":{port}" if port else "")
-    url = f"{scheme}://{host}{slash}{path}".rstrip("/")
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+        # Accessing .port validates a supplied port before any request is built.
+        port = parsed.port
+    except ValueError:
+        return ""
+    if (parsed.scheme.lower() not in ("http", "https") or not hostname
+            or parsed.username is not None or parsed.password is not None
+            or parsed.query or parsed.fragment):
+        return ""
+    host = parsed.netloc
+    if hostname.lower() == "localhost":
+        host = "127.0.0.1" + (f":{port}" if port is not None else "")
+    path = parsed.path
+    url = f"{parsed.scheme.lower()}://{host}{path}".rstrip("/")
     # Only append /v1 when there is no path at all. An endpoint served under a
     # prefix (a reverse proxy, OpenRouter's /api/v1) must be left alone.
     if not path:
@@ -206,11 +216,19 @@ def _uses_host(url: str, hostname: str) -> bool:
         return False
 
 
+def _uses_https(url: str) -> bool:
+    """Return whether a normalized endpoint protects credentials in transit."""
+    try:
+        return urlsplit(url).scheme.lower() == "https"
+    except ValueError:
+        return False
+
+
 def _uses_https_host(url: str, hostname: str) -> bool:
     """Match an exact hostname only when the URL protects credentials in transit."""
     try:
         parsed = urlsplit(url)
-        return parsed.scheme.lower() == "https" and parsed.hostname == hostname
+        return _uses_https(url) and parsed.hostname == hostname
     except ValueError:
         return False
 
@@ -437,7 +455,7 @@ class OpenAICompatLLM:
     # -- headers ------------------------------------------------------------
     def _headers(self) -> dict:
         h = {"Content-Type": "application/json"}
-        if self.key:
+        if self.key and _uses_https(self.base):
             h["Authorization"] = f"Bearer {self.key}"
         return h
 
@@ -472,7 +490,8 @@ class OpenAICompatLLM:
         error, classify it and rest this rung exactly as it rests a Gemini one."""
         try:
             with self._httpx.Client(timeout=timeout or self.timeout,
-                                    trust_env=self._trust_env) as cl:
+                                    trust_env=self._trust_env,
+                                    follow_redirects=False) as cl:
                 r = cl.post(f"{self.base}/chat/completions",
                             headers=self._headers(),
                             json=self._body(messages, tools, False, temperature))
@@ -505,7 +524,8 @@ class OpenAICompatLLM:
         # see providers/engine_pipeline._report. `complete()` IS wrapped, because
         # its caller is core/gemini.py's ladder, which has no such context.
         async with self._httpx.AsyncClient(timeout=self.timeout,
-                                           trust_env=self._trust_env) as cl:
+                                           trust_env=self._trust_env,
+                                           follow_redirects=False) as cl:
             if not stream:
                 r = await cl.post(f"{self.base}/chat/completions",
                                   headers=self._headers(), json=body)
@@ -585,7 +605,8 @@ class OpenAICompatLLM:
         """What this endpoint offers, so the panel can present a list instead of
         asking someone to type a model name exactly right."""
         with self._httpx.Client(timeout=timeout,
-                                trust_env=self._trust_env) as cl:
+                                trust_env=self._trust_env,
+                                follow_redirects=False) as cl:
             r = cl.get(f"{self.base}/models", headers=self._headers())
             r.raise_for_status()
             data = r.json()
@@ -667,6 +688,8 @@ class OpenAICompatLLM:
         """
         if not self.base:
             return False, "No address set."
+        if self.key and not _uses_https(self.base):
+            return False, "Provider API keys are sent only to HTTPS addresses."
         if not self.model:
             return False, "No model chosen."
         import time

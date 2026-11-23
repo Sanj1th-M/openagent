@@ -8,7 +8,7 @@ import time
 import pytest
 
 from dashboard import server as dashboard_server
-from providers.llm_openai import OpenAICompatLLM, _uses_host
+from providers.llm_openai import OpenAICompatLLM, _normalise, _uses_host
 
 
 def _route(app, path: str):
@@ -148,7 +148,74 @@ def test_gemini_key_reuse_requires_https(monkeypatch):
     )
 
     assert http_llm.key == ""
+    assert "Authorization" not in http_llm._headers()
     assert https_llm.key == "stored-secret"
+    assert https_llm._headers()["Authorization"] == "Bearer stored-secret"
+
+    http_custom = OpenAICompatLLM(
+        {
+            "base_url": "http://127.0.0.1:11434/v1",
+            "model": "local-model",
+            "api_key": "explicitly-configured-secret",
+        }
+    )
+    assert http_custom.base == "http://127.0.0.1:11434/v1"
+    assert "Authorization" not in http_custom._headers()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "ftp://generativelanguage.googleapis.com",
+        "file:///tmp/provider",
+        "javascript://generativelanguage.googleapis.com",
+        "https://host:bad/v1",
+        "https:///missing-host",
+        "https://user:password@example.test/v1",
+    ],
+)
+def test_provider_url_rejects_invalid_schemes_and_authorities(url):
+    assert _normalise(url) == ""
+
+
+def test_provider_redirect_does_not_forward_authorization(monkeypatch):
+    import httpx
+
+    llm = OpenAICompatLLM(
+        {
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+            "model": "gemini-3.5-flash",
+            "api_key": "test-stored-key",
+        }
+    )
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(
+            307,
+            headers={"Location": "https://attacker.test/collect"},
+            json={"choices": []},
+        )
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+
+    def client_without_redirects(*, timeout, trust_env, follow_redirects):
+        assert follow_redirects is False
+        return real_client(
+            transport=transport,
+            timeout=timeout,
+            trust_env=trust_env,
+            follow_redirects=follow_redirects,
+        )
+
+    monkeypatch.setattr(httpx, "Client", client_without_redirects)
+    llm.complete([{"role": "user", "content": "hello"}])
+
+    assert len(requests) == 1
+    assert requests[0].url.host == "generativelanguage.googleapis.com"
+    assert requests[0].headers["Authorization"] == "Bearer test-stored-key"
 
 
 def test_redirect_keeps_local_https_authority():
@@ -185,23 +252,60 @@ def test_config_is_written_with_owner_only_permissions(tmp_path, monkeypatch):
     assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
 
 
-def test_dev_agent_log_redacts_common_credentials(capsys):
-    from actions.dev_agent import _log
+class _RecordingPlayer:
+    def __init__(self):
+        self.logs = []
+        self.snapshots = []
 
-    _log(
-        None,
+    def write_log(self, message):
+        self.logs.append(message)
+
+    def show_code_job(self, snapshot):
+        self.snapshots.append(snapshot)
+
+
+def _assert_secrets_absent(secrets, *outputs):
+    combined = "\n".join(str(output) for output in outputs)
+    for secret in secrets:
+        assert secret not in combined
+
+
+def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypatch, tmp_path):
+    from actions import dev_agent
+
+    monkeypatch.setattr(dev_agent, "_JOB", {})
+    monkeypatch.setattr(dev_agent, "_player_ref", None)
+    player = _RecordingPlayer()
+    request_secret = "request_api_key_value"
+    dev_agent._new_job(tmp_path, "test-model", f"use api_key={request_secret}", player)
+    dev_agent._log(
+        player,
         "api_key=sk-abcdefghijklmnopqrstuvwxyz Bearer abc.def.ghi "
-        "access_token: Bearer xyz.def.ghi "
-        '{"password": "hunter2", "secret": "a value with spaces"}',
+        "access_token: Bearer xyz.def.ghi Authorization: Basic dXNlcjpwYXNz "
+        '{"password": "hunter2", "secret": "a value with spaces", '
+        '"token": "plain_token_value", "authToken": "camel_token_value"} '
+        "https://url-user:url-password@example.test/path",
     )
     output = capsys.readouterr().out
-    assert "sk-abcdefghijklmnopqrstuvwxyz" not in output
-    assert "Bearer abc.def.ghi" not in output
-    assert "Bearer xyz.def.ghi" not in output
-    assert "xyz.def.ghi" not in output
-    assert "hunter2" not in output
-    assert "a value with spaces" not in output
-    assert output.count("[REDACTED]") >= 5
+    _assert_secrets_absent(
+        [
+            "sk-abcdefghijklmnopqrstuvwxyz",
+            "abc.def.ghi",
+            "xyz.def.ghi",
+            "dXNlcjpwYXNz",
+            "hunter2",
+            "a value with spaces",
+            "plain_token_value",
+            "camel_token_value",
+            "url-user",
+            "url-password",
+            request_secret,
+        ],
+        output,
+        player.logs,
+        json.dumps(dev_agent._job_snapshot()),
+        json.dumps(player.snapshots),
+    )
 
 
 def test_dev_agent_failed_job_results_are_redacted(tmp_path, monkeypatch):
@@ -210,23 +314,84 @@ def test_dev_agent_failed_job_results_are_redacted(tmp_path, monkeypatch):
     monkeypatch.setattr(dev_agent, "_job_lock", threading.Lock())
     monkeypatch.setattr(dev_agent, "_JOB", {})
     monkeypatch.setattr(dev_agent, "_player_ref", None)
-    dev_agent._new_job(tmp_path, "test-model", "test request", None)
+    player = _RecordingPlayer()
+    dev_agent._new_job(tmp_path, "test-model", "test request", player)
     assert dev_agent._job_lock.acquire(blocking=False)
 
     completed = threading.Event()
     spoken = []
 
     def fail_job():
-        raise RuntimeError("access_token: Bearer xyz.def.ghi")
+        raise RuntimeError(
+            "access_token: Bearer failure_token_123 "
+            "Authorization: Basic ZmFpbHVyZTp0b2tlbg== "
+            "https://failure-user:failure-password@example.test"
+        )
 
     dev_agent._run_job(
         fail_job,
         tmp_path.name,
         "test-model",
         speak=lambda message: (spoken.append(message), completed.set()),
+        player=player,
     )
 
     assert completed.wait(5), "background job did not finish"
     result = dev_agent._job_snapshot()["result"]
-    assert "xyz.def.ghi" not in result
-    assert "xyz.def.ghi" not in spoken[0]
+    _assert_secrets_absent(
+        ["failure_token_123", "ZmFpbHVyZTp0b2tlbg==", "failure-user", "failure-password"],
+        result,
+        spoken,
+        player.logs,
+        json.dumps(dev_agent._job_snapshot()),
+        json.dumps(player.snapshots),
+    )
+
+
+def test_dev_agent_successful_job_redacts_result_and_notification(capsys, tmp_path, monkeypatch):
+    from actions import dev_agent
+
+    monkeypatch.setattr(dev_agent, "_job_lock", threading.Lock())
+    monkeypatch.setattr(dev_agent, "_JOB", {})
+    monkeypatch.setattr(dev_agent, "_player_ref", None)
+    player = _RecordingPlayer()
+    dev_agent._new_job(tmp_path, "test-model", "test request", player)
+    assert dev_agent._job_lock.acquire(blocking=False)
+
+    completed = threading.Event()
+    spoken = []
+    secrets = [
+        "success_token_123",
+        "success_api_key_1234567890",
+        "success-user",
+        "success-password",
+    ]
+    sensitive_result = (
+        "access_token: success_token_123 api_key=success_api_key_1234567890 "
+        "https://success-user:success-password@example.test"
+    )
+
+    def succeed_job():
+        dev_agent._log(player, sensitive_result)
+        return sensitive_result
+
+    dev_agent._run_job(
+        succeed_job,
+        tmp_path.name,
+        "test-model",
+        speak=lambda message: (spoken.append(message), completed.set()),
+        player=player,
+    )
+
+    assert completed.wait(5), "background job did not finish"
+    result = dev_agent._job_snapshot()["result"]
+    output = capsys.readouterr().out
+    _assert_secrets_absent(
+        secrets,
+        result,
+        spoken,
+        output,
+        player.logs,
+        json.dumps(dev_agent._job_snapshot()),
+        json.dumps(player.snapshots),
+    )

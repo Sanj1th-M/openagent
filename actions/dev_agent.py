@@ -503,13 +503,17 @@ def _build_project(
     log(f"Project: {proj_name} | Files: {len(files)} | Entry: {entry_point}")
     with _state_lock:
         if _JOB:
-            _JOB["folder"] = proj_name
-            _JOB["path"] = str(project_dir)
-            _JOB["summary"] = (f"New {language} project '{proj_name}': "
-                               f"{len(files)} files, run with `{run_command}`.")
-            _JOB["files"] = {f.get("path", ""): {"action": "create", "state": "waiting",
-                                                 "what": str(f.get("description", ""))}
-                             for f in files if f.get("path")}
+            _JOB["folder"] = _redact_credentials(proj_name)
+            _JOB["path"] = _redact_credentials(str(project_dir))
+            _JOB["summary"] = _redact_credentials(
+                f"New {language} project '{proj_name}': "
+                f"{len(files)} files, run with `{run_command}`."
+            )
+            _JOB["files"] = _scrub_job_value({
+                f.get("path", ""): {"action": "create", "state": "waiting",
+                                      "what": str(f.get("description", ""))}
+                for f in files if f.get("path")
+            })
     _update("writing")
 
     def _dep_sort_key(fi: dict) -> int:
@@ -690,9 +694,11 @@ def _new_job(folder: Path, model: str, instruction: str, player,
              kind: str = "improve") -> None:
     global _JOB, _player_ref
     with _state_lock:
-        _JOB = {"folder": folder.name, "path": str(folder), "model": model,
+        _JOB = {"folder": _redact_credentials(folder.name),
+                "path": _redact_credentials(str(folder)),
+                "model": _redact_credentials(model),
                 "kind": kind, "phases": _PHASES[kind],
-                "request": instruction, "status": "starting",
+                "request": _redact_credentials(instruction), "status": "starting",
                 "started": time.time(), "finished": None, "summary": "",
                 "files": {}, "steps": [], "result": ""}
     _player_ref = player
@@ -702,7 +708,7 @@ def _new_job(folder: Path, model: str, instruction: str, player,
 def _job_snapshot() -> dict:
     with _state_lock:
         snap = json.loads(json.dumps(_JOB)) if _JOB else {}
-    return snap
+    return _scrub_job_value(snap)
 
 
 def _publish() -> None:
@@ -724,23 +730,38 @@ def _update(status: str | None = None, file: str | None = None,
         if status:
             _JOB["status"] = status
         if file and file_state:
-            _JOB["files"].setdefault(file, {})["state"] = file_state
-        _JOB.update(fields)
+            safe_file = _redact_credentials(file)
+            _JOB["files"].setdefault(safe_file, {})["state"] = file_state
+        _JOB.update(_scrub_job_value(fields))
     _publish()
 
 
 def _redact_credentials(msg: str) -> str:
     """Remove common credential formats before text reaches logs or callers."""
     msg = str(msg)
+    msg = re.sub(r"(?i)\b(https?|wss?)://[^/@\s]+@", r"\1://[REDACTED]@", msg)
     msg = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", msg)
+    msg = re.sub(r"(?i)\bBasic\s+[A-Za-z0-9+/]+={0,2}", "Basic [REDACTED]", msg)
     msg = re.sub(
-        r"""(?i)(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|credential)["']?)"""
+        r"""(?i)(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization|[_-]?token)|token|password|secret|credential|client[_-]?secret)["']?)"""
         r"""(\s*[:=]\s*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,;]+)""",
         r"\1\2[REDACTED]", msg,
     )
     msg = re.sub(r"\bAIza[0-9A-Za-z_-]{20,}\b", "[REDACTED]", msg)
     msg = re.sub(r"\bsk-[A-Za-z0-9_-]{16,}\b", "[REDACTED]", msg)
     return msg
+
+
+def _scrub_job_value(value):
+    """Redact strings recursively in the UI-facing job state."""
+    if isinstance(value, str):
+        return _redact_credentials(value)
+    if isinstance(value, list):
+        return [_scrub_job_value(item) for item in value]
+    if isinstance(value, dict):
+        return {_redact_credentials(str(key)): _scrub_job_value(item)
+                for key, item in value.items()}
+    return value
 
 
 def _log(player, msg: str) -> None:
@@ -1365,10 +1386,12 @@ def _improve_folder(folder: Path, instruction: str, player=None) -> str:
         return summary or "I could not work out a change to make, sir."
     with _state_lock:
         if _JOB:                  # absent when called outside a background job
-            _JOB["files"] = {c["path"]: {"action": c["action"],
-                                         "what": str(c.get("what", "")),
-                                         "state": "waiting"} for c in changes}
-            _JOB["summary"] = summary
+            _JOB["files"] = _scrub_job_value(
+                {c["path"]: {"action": c["action"],
+                             "what": str(c.get("what", "")),
+                             "state": "waiting"} for c in changes}
+            )
+            _JOB["summary"] = _redact_credentials(summary)
     _update("writing")
     _log(player, f"Plan: {summary}")
     for c in changes:
@@ -1560,6 +1583,7 @@ def _run_job(job, name: str, who: str, speak=None, player=None) -> str:
     The caller must already hold `_job_lock`; it is released here."""
     def work():
         status = "done"
+        result = "The coding job did not produce a result."
         try:
             result = job()
             with _state_lock:
@@ -1576,8 +1600,10 @@ def _run_job(job, name: str, who: str, speak=None, player=None) -> str:
             )[:200]
             _log(player, result)
         finally:
-            result = _redact_credentials(result)
-            _job_lock.release()
+            try:
+                result = _redact_credentials(result)
+            finally:
+                _job_lock.release()
         _update(status, result=result, finished=time.time())
         if speak:
             speak(f"[DEV_AGENT_DONE] {result[:900]} | Tell the user briefly, in one "
