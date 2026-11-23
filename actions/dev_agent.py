@@ -747,13 +747,13 @@ def _redact_credentials(msg: str) -> str:
     msg = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", msg)
     msg = re.sub(r"(?i)\bBasic\s+[A-Za-z0-9+/]+={0,2}", "Basic [REDACTED]", msg)
     msg = re.sub(
-        r"(?i)(--(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization|[_-]?token)?|token|password|secret|credential|client[_-]?secret)(?:=\s*|\s+))"
+        r"(?i)(--(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization|[_-]?token)?|token|password|(?:aws[_-]?)?secret[_-]?access[_-]?key|secret|credential|client[_-]?secret)(?:=\s*|\s+))"
         r"""((?:"(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'|(?:\\[\s\S]|[^\s]))+)""",
         r"\1[REDACTED]",
         msg,
     )
     msg = re.sub(
-        r"""(?i)((?:\\)?["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization|[_-]?token)|token|password|secret|credential|client[_-]?secret)(?:\\)?["']?)"""
+        r"""(?i)((?:\\)?["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization|[_-]?token)|token|password|(?:aws[_-]?)?secret[_-]?access[_-]?key|secret|credential|client[_-]?secret)(?:\\)?["']?)"""
         r"""(\s*[:=]\s*)((?:\\?"(?:[^"\\]|\\[\s\S])*\\?"|\\?'(?:[^'\\]|\\[\s\S])*\\?'|(?:\\[\s\S]|(?!,\s*["'][\w.-]+["']\s*:)[^\s]))+)""",
         r"\1\2[REDACTED]", msg,
     )

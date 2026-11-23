@@ -410,6 +410,27 @@ def test_loading_config_fails_closed_when_permissions_cannot_be_restricted(
     assert "refusing to load settings" in capsys.readouterr().out
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX ownership and modes are not portable to Windows")
+def test_loading_protected_config_does_not_chmod_read_only_paths(tmp_path, monkeypatch):
+    from memory import config_manager
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(mode=0o700)
+    config_file = config_dir / "api_keys.json"
+    config_file.write_text(json.dumps({"gemini_api_key": "legacy-secret"}), encoding="utf-8")
+    config_dir.chmod(0o700)
+    config_file.chmod(0o600)
+    monkeypatch.setattr(config_manager, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(config_manager, "CONFIG_FILE", config_file)
+
+    def deny_chmod(*_args, **_kwargs):
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr(config_manager.os, "chmod", deny_chmod)
+
+    assert config_manager.load_api_keys() == {"gemini_api_key": "legacy-secret"}
+
+
 class _RecordingPlayer:
     def __init__(self):
         self.logs = []
@@ -440,6 +461,8 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
         player,
         "api_key=sk-abcdefghijklmnopqrstuvwxyz Bearer abc.def.ghi "
         "access_token: Bearer xyz.def.ghi Authorization: Basic dXNlcjpwYXNz "
+        "AWS_SECRET_ACCESS_KEY=aws_secret_value --secret-access-key aws_cli_secret "
+        "--aws-secret-access-key aws_full_cli_secret "
         '{"password": "hunter2", "secret": "a value with spaces", '
         '"token": "plain_token_value", "authToken": "camel_token_value"} '
         'PASSWORD=prefix" secret tail" '
@@ -469,6 +492,9 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
             "abc.def.ghi",
             "xyz.def.ghi",
             "dXNlcjpwYXNz",
+            "aws_secret_value",
+            "aws_cli_secret",
+            "aws_full_cli_secret",
             "hunter2",
             "json_secret_value",
             "a value with spaces",
@@ -550,6 +576,7 @@ def test_dev_agent_failed_job_results_are_redacted(tmp_path, monkeypatch):
     def fail_job():
         raise RuntimeError(
             "access_token: Bearer failure_token_123 "
+            "AWS_SECRET_ACCESS_KEY=failure_aws_secret "
             "Authorization: Basic ZmFpbHVyZTp0b2tlbg== "
             "https://failure-user:failure-password@example.test"
         )
@@ -565,7 +592,13 @@ def test_dev_agent_failed_job_results_are_redacted(tmp_path, monkeypatch):
     assert completed.wait(5), "background job did not finish"
     result = dev_agent._job_snapshot()["result"]
     _assert_secrets_absent(
-        ["failure_token_123", "ZmFpbHVyZTp0b2tlbg==", "failure-user", "failure-password"],
+        [
+            "failure_token_123",
+            "failure_aws_secret",
+            "ZmFpbHVyZTp0b2tlbg==",
+            "failure-user",
+            "failure-password",
+        ],
         result,
         spoken,
         player.logs,
@@ -588,12 +621,14 @@ def test_dev_agent_successful_job_redacts_result_and_notification(capsys, tmp_pa
     spoken = []
     secrets = [
         "success_token_123",
+        "success_aws_secret",
         "success_api_key_1234567890",
         "success-user",
         "success-password",
     ]
     sensitive_result = (
-        "access_token: success_token_123 api_key=success_api_key_1234567890 "
+        "access_token: success_token_123 AWS_SECRET_ACCESS_KEY=success_aws_secret "
+        "api_key=success_api_key_1234567890 "
         "https://success-user:success-password@example.test"
     )
 

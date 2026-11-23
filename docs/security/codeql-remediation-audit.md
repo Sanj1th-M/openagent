@@ -47,7 +47,7 @@ The table distinguishes remediated findings from documented false positives. Fal
 - `dashboard/server.py`: confined upload downloads, safely encoded inline script values, generic upload errors, and a locally pinned HTTPS redirect destination.
 - `providers/llm_openai.py`: exact parsed-host checks for Gemini and MiniMax provider-specific behavior. Provider requests now reject all non-2xx responses, including redirects, while keeping redirects disabled.
 - `providers/stt_whisper.py`: hosted transcription validates HTTP(S) endpoints, withholds configured API keys on HTTP, disables redirects, and rejects non-2xx responses.
-- `core/gemini.py`, `main.py`, `core/audio_devices.py`, `actions/dev_agent.py`: removed raw exception, device, model, or credential-like values from affected logs; the coding-agent logger redacts common credential formats, including mixed quoting, escaped characters, line continuations, CLI options, and URI user-info. Project output logs record capture status without copying raw output.
+- `core/gemini.py`, `main.py`, `core/audio_devices.py`, `actions/dev_agent.py`: removed raw exception, device, model, or credential-like values from affected logs; the coding-agent logger redacts common credential formats, including AWS secret access keys, mixed quoting, escaped characters, line continuations, CLI options, and URI user-info. Project output logs record capture status without copying raw output.
 - `memory/config_manager.py`: restricts existing POSIX config directory/file modes before credential reads and fails closed if it cannot; writes use restrictive same-directory temporary files.
 - `tests/test_codeql_remediation.py`: regression coverage for path traversal, symlink escape, HTML/script encoding, URL host spoofing, redirect authority and rejection across synchronous, streaming and transcription requests, HTTP credential withholding, upload exception disclosure, config permissions, and log redaction including adjacent JSON fields, mixed quoted/unquoted assignments, escaped characters and line continuations, CLI credentials, and database URLs.
 - `requirements.txt`, `actions/file_processor.py`, and `core/cloud.py`: removed the vulnerable PyPDF2 fallback and retained the existing `pypdf` fallback at version 3.9.0 or newer. This followed a dependency audit finding for crafted PDFs that could cause an infinite loop; the upstream advisory lists PyPDF2 3.0.1 as affected and pypdf 3.9.0 as patched ([GHSA-4vvm-4w3v-6mr8](https://github.com/advisories/GHSA-4vvm-4w3v-6mr8)).
@@ -57,11 +57,11 @@ The table distinguishes remediated findings from documented false positives. Fal
 
 Local validation on 2026-11-23, after the final application and test changes (GitHub checks for the resulting commit are tracked on PR #4):
 
-- Remediation regressions: 23 passed, 4 skipped.
-- Full `python -m pytest tests/ -q`: 48 passed, 4 skipped. The platform-specific permission and symlink tests skip where Windows cannot provide the required POSIX modes or symlink privileges.
+- Remediation regressions: 23 passed, 5 skipped.
+- Full `python -m pytest tests/ -q`: 48 passed, 5 skipped. The platform-specific permission and symlink tests skip where Windows cannot provide the required POSIX modes or symlink privileges.
 - `python -m providers._tests`: 100 passed, 0 failed.
 - `ruff check tests/ setup.py`, `ruff format --check tests/ setup.py`, and `mypy tests/`: passed.
-- Bandit CI scope (`actions core gui memory plugins main.py ui.py setup.py tests`): no Medium or High issues identified across 36,138 lines.
+- Bandit CI scope (`actions core gui memory plugins main.py ui.py setup.py tests`): no Medium or High issues identified across 36,178 lines.
 - `pip-audit -r requirements.txt`: no known vulnerabilities found.
 - PR head `beb5c9eb3fac970a8049135af7161dc58088f137`: all six Ubuntu/Windows/macOS × Python 3.11/3.12 test jobs passed, as did quality/linting, security auditing, packaging, Bandit and pip-audit. CodeQL reported no new alerts in code changed by the PR; no alerts were dismissed. This run predates the latest redirect-response and JSON-field redaction fixes; re-run GitHub checks on the updated head.
 
