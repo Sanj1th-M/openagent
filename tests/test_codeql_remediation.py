@@ -686,6 +686,91 @@ def test_settings_toggles_report_permission_refusals(monkeypatch):
     assert "PTT refreshed" in messages
 
 
+def test_ptt_failure_still_refreshes_when_rollback_save_is_denied(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from gui.window import MainWindow
+    from memory import config_manager
+
+    messages = []
+    apply_shortcut = Mock()
+    refresh_buttons = Mock()
+    ui = SimpleNamespace(
+        _log=SimpleNamespace(append_log=messages.append),
+        on_push_to_talk=lambda _enabled: (_ for _ in ()).throw(RuntimeError("hotkey unavailable")),
+        _apply_ptt_shortcut=apply_shortcut,
+        _refresh_talk_btns=refresh_buttons,
+    )
+    save = Mock(side_effect=[None, PermissionError("protected settings")])
+    monkeypatch.setattr(config_manager, "get_push_to_talk_enabled", lambda: False)
+    monkeypatch.setattr(config_manager, "save_push_to_talk_enabled", save)
+
+    MainWindow._toggle_ptt(ui)
+
+    assert save.call_count == 2
+    apply_shortcut.assert_called_once_with(False)
+    refresh_buttons.assert_called_once_with()
+    assert any("rollback was not saved" in message for message in messages)
+
+
+def test_write_config_flushes_and_syncs_temp_file(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    from memory import config_manager
+
+    config_dir = tmp_path / "config"
+    config_file = config_dir / "api_keys.json"
+    monkeypatch.setattr(config_manager, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(config_manager, "CONFIG_FILE", config_file)
+    monkeypatch.setattr(config_manager, "_sync_config_directory", lambda: None)
+    fsync = Mock()
+    monkeypatch.setattr(config_manager.os, "fsync", fsync)
+
+    config_manager._write_config({"gemini_api_key": "example-secret"})
+
+    assert json.loads(config_file.read_text(encoding="utf-8")) == {
+        "gemini_api_key": "example-secret"
+    }
+    fsync.assert_called_once()
+
+
+def test_config_directory_sync_closes_fd_when_fsync_fails(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from memory import config_manager
+
+    opened = Mock(return_value=42)
+    fsync = Mock(side_effect=OSError("directory sync unsupported"))
+    close = Mock()
+    fake_os = SimpleNamespace(name="posix", O_RDONLY=0, open=opened, fsync=fsync, close=close)
+    monkeypatch.setattr(config_manager, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_manager, "os", fake_os)
+
+    config_manager._sync_config_directory()
+
+    opened.assert_called_once_with(tmp_path, 0)
+    fsync.assert_called_once_with(42)
+    close.assert_called_once_with(42)
+
+
+def test_config_directory_sync_is_skipped_on_windows(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from memory import config_manager
+
+    opened = Mock()
+    fake_os = SimpleNamespace(name="nt", O_RDONLY=0, open=opened, fsync=Mock(), close=Mock())
+    monkeypatch.setattr(config_manager, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_manager, "os", fake_os)
+
+    config_manager._sync_config_directory()
+
+    opened.assert_not_called()
+
+
 def test_dev_agent_tool_arguments_are_omitted_from_dispatch_log():
     from main import _tool_call_log_line
 

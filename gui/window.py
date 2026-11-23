@@ -2580,7 +2580,13 @@ class MainWindow(QMainWindow):
                 scope = self.on_push_to_talk(want)
             except Exception as e:
                 self._log.append_log(f"ERR: Push-to-talk failed — {e}")
-                save_push_to_talk_enabled(False)
+                try:
+                    save_push_to_talk_enabled(False)
+                except PermissionError as rollback_error:
+                    self._log.append_log(
+                        "ERR: Push-to-talk rollback was not saved — "
+                        f"{type(rollback_error).__name__}"
+                    )
                 want = False
         self._apply_ptt_shortcut(want and scope != "global")
         self._refresh_talk_btns()

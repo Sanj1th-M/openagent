@@ -84,6 +84,26 @@ def _locked(fn):
     return wrapper
 
 
+def _sync_config_directory() -> None:
+    """Flush the directory entry after replacing the settings file on POSIX."""
+    if os.name == "nt":
+        return
+    try:
+        directory_fd = os.open(CONFIG_DIR, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        try:
+            os.fsync(directory_fd)
+        except OSError:
+            pass
+    finally:
+        try:
+            os.close(directory_fd)
+        except OSError:
+            pass
+
+
 def _write_config(data: dict) -> None:
     ensure_config_dir()
     fd, tmp_name = tempfile.mkstemp(prefix=f".{CONFIG_FILE.name}.", suffix=".tmp",
@@ -92,12 +112,15 @@ def _write_config(data: dict) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(data, stream, indent=4)
+            stream.flush()
+            os.fsync(stream.fileno())
         # Restrict access before the temporary file is atomically installed.
         # On POSIX this is owner-only; Windows retains the parent directory ACL.
         os.chmod(tmp, stat.S_IREAD | stat.S_IWRITE)
         for attempt in range(20):
             try:
                 os.replace(tmp, CONFIG_FILE)
+                _sync_config_directory()
                 return
             except PermissionError:
                 # Windows: an antivirus scan or a reader can hold the file for a
