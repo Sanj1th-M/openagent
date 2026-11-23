@@ -324,9 +324,13 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
         '{"password": "hunter2", "secret": "a value with spaces", '
         '"token": "plain_token_value", "authToken": "camel_token_value"} '
         'PASSWORD=prefix" secret tail" '
+        '--password cli-password --api-key "cli key secret" ordinary-argument '
+        "postgresql://db-user:db-password@db.example.test/app "
+        "postgresql://db.example.test/app "
         "https://url-user:url-password@example.test/path",
     )
     output = capsys.readouterr().out
+    assert "postgresql://db.example.test/app" in output + " ".join(player.logs)
     _assert_secrets_absent(
         [
             "sk-abcdefghijklmnopqrstuvwxyz",
@@ -338,6 +342,10 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
             "plain_token_value",
             "camel_token_value",
             "secret tail",
+            "cli-password",
+            "cli key secret",
+            "db-user",
+            "db-password",
             "url-user",
             "url-password",
             request_secret,

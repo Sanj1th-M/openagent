@@ -739,9 +739,19 @@ def _update(status: str | None = None, file: str | None = None,
 def _redact_credentials(msg: str) -> str:
     """Remove common credential formats before text reaches logs or callers."""
     msg = str(msg)
-    msg = re.sub(r"(?i)\b(https?|wss?)://[^/@\s]+@", r"\1://[REDACTED]@", msg)
+    msg = re.sub(
+        r"(?i)\b([a-z][a-z0-9+.-]*://)[^/@\s]+@",
+        r"\1[REDACTED]@",
+        msg,
+    )
     msg = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", msg)
     msg = re.sub(r"(?i)\bBasic\s+[A-Za-z0-9+/]+={0,2}", "Basic [REDACTED]", msg)
+    msg = re.sub(
+        r"(?i)(--(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization|[_-]?token)?|token|password|secret|credential|client[_-]?secret)(?:=\s*|\s+))"
+        r'("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|[^\s,;]+)',
+        r"\1[REDACTED]",
+        msg,
+    )
     msg = re.sub(
         r"""(?i)(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization|[_-]?token)|token|password|secret|credential|client[_-]?secret)["']?)"""
         r"""(\s*[:=]\s*)((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,;])+)""",
