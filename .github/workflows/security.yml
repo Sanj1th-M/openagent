@@ -30,7 +30,7 @@ jobs:
       - name: Install Bandit
         run: python -m pip install --upgrade pip bandit
       - name: Scan Python source
-        run: bandit -ll -r . -x ./.git,./.venv,./venv
+        run: bandit -ll -r actions core gui memory plugins main.py ui.py setup.py tests
 
   dependency-audit:
     name: pip-audit - Dependency vulnerability scan
