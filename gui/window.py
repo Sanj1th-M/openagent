@@ -2548,7 +2548,12 @@ class MainWindow(QMainWindow):
         instant and switching back costs nothing."""
         from memory.config_manager import get_hud_style, save_hud_style
         want = "core" if get_hud_style() == "face" else "face"
-        save_hud_style(want)
+        try:
+            save_hud_style(want)
+        except PermissionError as e:
+            self._log.append_log(f"ERR: HUD style setting not saved — {e}")
+            self._refresh_hud_btn()
+            return
         try:
             self.hud.hud_style = want
             self.hud.update()
@@ -2563,7 +2568,12 @@ class MainWindow(QMainWindow):
         from memory.config_manager import (get_push_to_talk_enabled,
                                            save_push_to_talk_enabled)
         want = not get_push_to_talk_enabled()
-        save_push_to_talk_enabled(want)
+        try:
+            save_push_to_talk_enabled(want)
+        except PermissionError as e:
+            self._log.append_log(f"ERR: Push-to-talk setting not saved — {e}")
+            self._refresh_talk_btns()
+            return
         scope = None
         if self.on_push_to_talk:
             try:

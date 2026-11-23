@@ -746,13 +746,13 @@ def _redact_credentials(msg: str) -> str:
     )
     msg = re.sub(
         rf"(?im)((?:\\)?[\"']?(?:{credential_labels})(?:\\)?[\"']?\s*[:=]\s*)"
-        r"([\"'])((?:\\[\s\S]|(?!\2)[^\r\n])*)(?<!\\)$",
+        r"([\"'])((?:\\[\s\S]|(?!\2)[^\r\n\\])*)(?<!\\)$",
         r"\1[REDACTED]",
         msg,
     )
     msg = re.sub(
         rf"(?im)(--(?:{credential_labels})(?:=\s*|\s+))([\"'])"
-        r"((?:\\[\s\S]|(?!\2)[^\r\n])*)(?<!\\)$",
+        r"((?:\\[\s\S]|(?!\2)[^\r\n\\])*)(?<!\\)$",
         r"\1[REDACTED]",
         msg,
     )

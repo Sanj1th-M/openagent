@@ -592,6 +592,48 @@ def test_dev_agent_redacts_credentials_before_preview_truncation():
     assert "[REDACTED]" in preview
 
 
+def test_dev_agent_redacts_quoted_credentials_followed_by_long_escape_run():
+    from actions import dev_agent
+
+    secret = "sensitive_password_value"
+    diagnostic = f'password="{secret}"' + ("\\" * 32)
+
+    redacted = dev_agent._redact_credentials(diagnostic)
+
+    assert secret not in redacted
+    assert "[REDACTED]" in redacted
+
+
+def test_settings_toggles_report_permission_refusals(monkeypatch):
+    from types import SimpleNamespace
+
+    from gui.window import MainWindow
+    from memory import config_manager
+
+    messages = []
+    ui = SimpleNamespace(
+        _log=SimpleNamespace(append_log=messages.append),
+        _refresh_hud_btn=lambda: messages.append("HUD refreshed"),
+        _refresh_talk_btns=lambda: messages.append("PTT refreshed"),
+    )
+
+    def refuse_save(*args):
+        raise PermissionError("protected settings")
+
+    monkeypatch.setattr(config_manager, "get_hud_style", lambda: "face")
+    monkeypatch.setattr(config_manager, "save_hud_style", refuse_save)
+    MainWindow._toggle_hud_style(ui)
+    assert "HUD style setting not saved" in messages[0]
+    assert "HUD refreshed" in messages
+
+    messages.clear()
+    monkeypatch.setattr(config_manager, "get_push_to_talk_enabled", lambda: False)
+    monkeypatch.setattr(config_manager, "save_push_to_talk_enabled", refuse_save)
+    MainWindow._toggle_ptt(ui)
+    assert "Push-to-talk setting not saved" in messages[0]
+    assert "PTT refreshed" in messages
+
+
 def test_dev_agent_tool_arguments_are_omitted_from_dispatch_log():
     from main import _tool_call_log_line
 
