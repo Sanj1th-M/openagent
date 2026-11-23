@@ -576,7 +576,7 @@ def _build_project(
     for attempt in range(1, MAX_FIX_ATTEMPTS + 1):
         log(f"Running project (attempt {attempt}/{MAX_FIX_ATTEMPTS})...")
         last_output = _run_project(run_command, project_dir, timeout)
-        log(f"Output preview: {last_output[:150]}")
+        log(f"Output preview: {_redacted_preview(last_output)}")
 
         if not _has_error(last_output, run_command):
             msg = (
@@ -760,6 +760,11 @@ def _redact_credentials(msg: str) -> str:
     msg = re.sub(r"\bAIza[0-9A-Za-z_-]{20,}\b", "[REDACTED]", msg)
     msg = re.sub(r"\bsk-[A-Za-z0-9_-]{16,}\b", "[REDACTED]", msg)
     return msg
+
+
+def _redacted_preview(msg: str, limit: int = 150) -> str:
+    """Redact complete diagnostic text before truncating its UI preview."""
+    return _redact_credentials(msg)[:limit]
 
 
 def _scrub_job_value(value):
