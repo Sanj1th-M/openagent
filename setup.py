@@ -138,8 +138,12 @@ def main() -> None:
 
 if __name__ == "__main__":
     # If invoked by build tools (build, pip, setuptools)
-    if any(arg in sys.argv[1:] for arg in ["sdist", "bdist_wheel", "egg_info", "dist_info", "--name", "--version", "clean"]):
+    if any(
+        arg in sys.argv[1:]
+        for arg in ["sdist", "bdist_wheel", "egg_info", "dist_info", "--name", "--version", "clean"]
+    ):
         import setuptools
+
         setuptools.setup()
     else:
         main()
