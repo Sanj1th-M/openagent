@@ -124,8 +124,9 @@ source .venv/bin/activate
 # Remove-Item -Recurse -Force .venv
 # python -m venv .venv
 # .\.venv\Scripts\Activate.ps1
+# python -m pip install -r requirements.txt
+# python -m playwright install chromium firefox
 
-python setup.py
+# The commands above restore dependencies from the checked-out tag.
 ```
-Configuration files (`config/api_keys.json`) remain backward-compatible; if an incompatible setting exists, `memory/config_manager.py` ignores unmapped keys gracefully.
 Configuration files (`config/api_keys.json`) remain backward-compatible; if an incompatible setting exists, `memory/config_manager.py` ignores unmapped keys gracefully.
