@@ -19,12 +19,12 @@ graph TD
         ProviderTests["Providers Integration Tests (`python -m providers._tests`)"]
     end
 
-    Ruff --> PassOrFail{"Quality Gate"}
+    Ruff --> PassOrFail{"Quality Gate (Blocking)"}
     Mypy --> PassOrFail
     Bandit --> PassOrFail
-    PipAudit --> PassOrFail
     Pytest --> PassOrFail
     ProviderTests --> PassOrFail
+    PipAudit -.->|Report-Only / Non-blocking| PassOrFail
 ```
 
 ---
@@ -118,4 +118,4 @@ Before submitting changes, perform these smoke tests:
 1. **Audio Verification**: Launch `main.py` and speak a query to confirm microphone input capture, waveform animation, and speaker output.
 2. **GUI Interaction**: Open the settings drawer, change themes, and verify widget repainting without Qt thread violations.
 3. **Tool Invocations**: Trigger a harmless desktop automation action (e.g., "What time is it?" or "Search web for openagent") to verify tool execution.
-4. **Offline Fallback**: Disconnect network or configure an invalid Gemini key to verify seamless transition to `providers/engine_pipeline.py`.
+4. **Local Pipeline Execution**: Configure a local provider in ⚙ → **ENGINE & PROVIDERS** or set `"local_only": true` with valid `providers` in `config/api_keys.json` to verify `providers/engine_pipeline.py`. Note that disconnecting the network in default Gemini mode does not automatically activate the modular pipeline without explicit provider configuration.

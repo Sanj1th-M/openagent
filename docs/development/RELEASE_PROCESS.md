@@ -55,14 +55,15 @@ Verify generated `.tar.gz` and `.whl` in `dist/`.
 ## 4. Tagging & Automated GitHub Release
 
 When all verification steps pass:
-1. Commit the release preparation changes:
+1. Stage and commit the release preparation changes:
    ```bash
+   git add CHANGELOG.md pyproject.toml
    git commit -m "chore(release): prepare release vX.Y.Z"
    ```
-2. Create an annotated Git tag:
+2. Create an annotated Git tag and push only the intended release tag:
    ```bash
    git tag -a vX.Y.Z -m "Release vX.Y.Z"
-   git push origin main --tags
+   git push origin main vX.Y.Z
    ```
 3. The `.github/workflows/release.yml` workflow triggers automatically on tag pushes matching `v*`:
    - Checks out the repository.
@@ -77,8 +78,10 @@ When all verification steps pass:
 - Check the GitHub Actions run logs in the Actions tab.
 - Verify release artifacts are attached to the new release on GitHub.
 - Perform a fresh clone in a clean environment to smoke test installation:
-  ```bash
-  git clone --branch vX.Y.Z https://github.com/Sanj1th-M/openagent.git
-  cd openagent
-  python setup.py
-  ```
+   ```bash
+   git clone --branch vX.Y.Z https://github.com/Sanj1th-M/openagent.git
+   cd openagent
+   python3 -m venv .venv
+   source .venv/bin/activate       # Windows: .\.venv\Scripts\Activate.ps1
+   python setup.py
+   ```

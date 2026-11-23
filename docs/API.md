@@ -6,67 +6,76 @@ This document provides technical documentation of the internal APIs, provider in
 
 ## 1. Provider Interfaces (`providers/base.py`)
 
-All pluggable AI providers inherit from base structures in `providers/base.py`.
+All pluggable AI providers adhere to protocols and declarations in `providers/base.py`.
 
 ### Provider Declaration Schema
 Every provider module declares a `PROVIDER` metadata dictionary:
 
 ```python
 PROVIDER = {
-    "id": "provider_identifier",
-    "name": "Human-Readable Provider Name",
-    "kind": "llm",  # Options: "llm" | "stt" | "tts" | "engine"
-    "description": "Short explanation of capabilities",
-    "fields": [
-        Field(key="api_key", label="API Key", secret=True),
-        Field(key="endpoint", label="Base URL", default="http://localhost:11434/v1")
-    ],
-    "caps": {"streaming": True, "tools": True}
+    "id": "openai_compat",              # Unique, stable, stored in config
+    "kind": "llm",                       # Options: "llm" | "stt" | "tts" | "engine"
+    "label": "OpenAI-compatible",        # Display label for GUI settings
+    "hint": "Ollama · LM Studio · Groq · DeepSeek · OpenRouter · vLLM",
+    "requires": ("httpx",),              # Checked via find_spec, not imported at boot
+    "install": "httpx",                  # Package installed by one-click button
+    "needs": (
+        Field("base_url", "Base URL", default="http://localhost:11434/v1"),
+        Field("model", "Model"),
+        Field("api_key", "API key", kind="secret", required=False),
+    ),
+    "caps": {"tools": True, "tool_format": "openai", "max_tools": 12},
+    "factory": _make,                    # Called once, lazily, on first use
 }
 ```
 
-### Core Provider Classes
+### Core Provider Protocols
 
-#### 1. `BaseLLM` (`providers/base.py`)
+#### 1. `LLM` (`providers/base.py`)
 ```python
-class BaseLLM(abc.ABC):
-    @abc.abstractmethod
+class LLM(Protocol):
+    """Text in, text out, with tools."""
+    caps: dict
+
     async def chat(
         self,
-        messages: list[Msg],
-        tools: Optional[list[dict]] = None,
-        temperature: float = 0.7,
-        max_tokens: Optional[int] = None
-    ) -> Msg:
-        """Execute a chat completion turn."""
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        *,
+        stream: bool = True,
+    ) -> AsyncIterator[dict]:
+        """Yields {"text": str} and/or {"tool_calls": [FunctionCall, ...]}."""
         ...
+```
 
-    @abc.abstractmethod
-    async def stream(
+#### 2. `STT` (`providers/base.py`)
+```python
+class STT(Protocol):
+    """Audio in, text out."""
+    caps: dict
+
+    async def transcribe(
         self,
-        messages: list[Msg],
-        tools: Optional[list[dict]] = None,
-        temperature: float = 0.7
-    ) -> AsyncIterator[str | FunctionCall]:
-        """Stream response chunks or tool calls."""
+        pcm: bytes,
+        sample_rate: int = 16000,
+        language: str = "",
+    ) -> str:
+        """Transcribe raw PCM audio to text."""
         ...
 ```
 
-#### 2. `BaseSTT` (`providers/base.py`)
+#### 3. `TTS` (`providers/base.py`)
 ```python
-class BaseSTT(abc.ABC):
-    @abc.abstractmethod
-    async def transcribe(self, audio_bytes: bytes, sample_rate: int = 16000) -> str:
-        """Convert raw PCM audio bytes to transcript text."""
-        ...
-```
+class TTS(Protocol):
+    """Text in, 24 kHz mono PCM out."""
+    caps: dict
 
-#### 3. `BaseTTS` (`providers/base.py`)
-```python
-class BaseTTS(abc.ABC):
-    @abc.abstractmethod
-    async def synthesize(self, text: str, voice: Optional[str] = None) -> AsyncIterator[bytes]:
-        """Synthesize text into raw PCM audio chunks."""
+    async def speak(
+        self,
+        text: str,
+        voice: str = "",
+    ) -> AsyncIterator[bytes]:
+        """Synthesize text into chunks of 24 kHz mono PCM audio."""
         ...
 ```
 

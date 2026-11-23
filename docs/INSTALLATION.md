@@ -31,18 +31,42 @@ This guide provides instructions for installing and running **openagent** across
   ```bash
   brew install git
   ```
-- **Linux**: Install via standard package manager:
+- **Debian / Ubuntu**:
   ```bash
   sudo apt-get update && sudo apt-get install -y git
+  ```
+- **Fedora**:
+  ```bash
+  sudo dnf install -y git
+  ```
+- **Arch Linux**:
+  ```bash
+  sudo pacman -S --noconfirm git
   ```
 
 ### System Audio & GUI Libraries (Linux Only)
 Linux distributions require core multimedia and X11/Wayland libraries for PyQt6 and PortAudio:
+
+**Debian / Ubuntu**:
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
     libegl1 libgl1 libfontconfig1 libxkbcommon-x11-0 \
     libdbus-1-3 libasound2-dev libportaudio2 xvfb
+```
+
+**Fedora**:
+```bash
+sudo dnf install -y \
+    mesa-libEGL mesa-libGL fontconfig libxkbcommon-x11 \
+    dbus-libs alsa-lib-devel portaudio-devel xorg-x11-server-Xvfb
+```
+
+**Arch Linux**:
+```bash
+sudo pacman -S --noconfirm \
+    mesa fontconfig libxkbcommon-x11 \
+    dbus alsa-lib portaudio xorg-server-xvfb
 ```
 
 ---

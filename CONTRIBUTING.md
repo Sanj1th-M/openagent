@@ -7,7 +7,7 @@ Thank you for your interest in contributing to **openagent**! We welcome communi
 ## 1. Code of Conduct & Core Principles
 
 - **Security First**: openagent operates with direct desktop automation capabilities. All changes must respect security boundaries, avoid executing untrusted remote code without confirmation, and never leak credentials.
-- **Thread Safety**: Never touch Qt GUI widgets from background worker threads. See [Coding Standards](file:///docs/development/CODING_STANDARDS.md).
+- **Thread Safety**: Never touch Qt GUI widgets from background worker threads. See [Coding Standards](docs/development/CODING_STANDARDS.md).
 - **Graceful Error Handling**: Tools and plugins must catch exceptions and return explanatory feedback rather than crashing the assistant.
 
 ---

@@ -78,10 +78,7 @@ If deploying on a local home server or headless desktop machine to serve the rem
 export QT_QPA_PLATFORM=offscreen
 python main.py
 ```
-Or run the dashboard independently:
-```bash
-python -m uvicorn dashboard.server:app --host 0.0.0.0 --port 8000
-```
+*Note: The dashboard requires initialization through `DashboardServer.serve()` to configure authentication, TLS certificates, and port redirection properly. Launching `python main.py` manages the dashboard server lifecycle.*
 
 ---
 
@@ -99,5 +96,13 @@ python -m playwright install chromium firefox
 If a version introduces incompatibility on your workstation:
 ```bash
 git checkout <previous_stable_tag>
+
+# Recreate the virtual environment to restore the previous release's exact dependencies
+# macOS / Linux
+rm -rf .venv && python3 -m venv .venv && source .venv/bin/activate
+# Windows
+Remove-Item -Recurse -Force .venv; python -m venv .venv; .\.venv\Scripts\Activate.ps1
+
+python setup.py
 ```
 Configuration files (`config/api_keys.json`) remain backward-compatible; if an incompatible setting exists, `memory/config_manager.py` ignores unmapped keys gracefully.

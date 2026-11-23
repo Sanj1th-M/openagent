@@ -33,15 +33,15 @@ A representative `config/api_keys.json` configuration file:
   "audio_input_device": null,
   "audio_output_device": null,
   "providers": {
-    "active_llm": "gemini",
-    "active_stt": "whisper_local",
-    "active_tts": "system",
-    "llm_openai": {
+    "active_llm": "openai_compat",
+    "active_stt": "whisper",
+    "active_tts": "piper",
+    "openai_compat": {
       "base_url": "http://localhost:11434/v1",
       "api_key": "optional-key-for-local-server",
       "model": "llama3"
     },
-    "tts_elevenlabs": {
+    "elevenlabs": {
       "api_key": "YOUR_ELEVENLABS_KEY",
       "voice_id": "21m00Tcm4TlvDq8ikWAM"
     }
@@ -74,10 +74,10 @@ A representative `config/api_keys.json` configuration file:
 - **`audio_output_device`** *(integer | null)*: Index or name of the audio speaker device. `null` selects the OS default.
 
 ### D. Provider Registry (`providers/`)
-OpenAgent allows plug-and-play swapping of model providers via `providers/registry.py`:
-- **`active_llm`**: Selected LLM provider (`"gemini"`, `"llm_openai"`, or custom catalog entries).
-- **`active_stt`**: Selected Speech-to-Text provider (`"gemini_live"`, `"stt_whisper"`).
-- **`active_tts`**: Selected Text-to-Speech provider (`"gemini_live"`, `"tts_piper"`, `"tts_elevenlabs"`, `"tts_system"`).
+openagent allows plug-and-play swapping of model providers via `providers/registry.py`:
+- **`active_llm`**: Selected LLM provider (`"openai_compat"` or catalog entries like `"openai_compat@groq"`).
+- **`active_stt`**: Selected Speech-to-Text provider (`"whisper"`).
+- **`active_tts`**: Selected Text-to-Speech provider (`"piper"`, `"system_tts"`, `"elevenlabs"`).
 
 ### E. Remote Dashboard (`dashboard/`)
 - **`dashboard.enabled`** *(boolean)*: Enables the local FastAPI web server.

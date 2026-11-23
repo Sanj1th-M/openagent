@@ -50,13 +50,13 @@ This document outlines the software engineering and coding standards for contrib
   ```python
   from core import gemini
 
-  # Fast one-line classifications / extractions
+  # Fast one-line classifications / extractions (returns empty string "" on failure)
   text = gemini.text(prompt, tier=gemini.FAST)
 
-  # Structured JSON output
+  # Structured JSON output (returns None on failure or unparseable output)
   data = gemini.as_json(prompt, tier=gemini.SMART)
   ```
-- Handle `None` gracefully. Every model invocation can fail or timeout.
+- Handle model failures gracefully. Note the distinct fallback behaviors: `gemini.text()` defaults to an empty string `""` when no model answers, whereas `gemini.as_json()` returns `None` (or custom `default`). Checking only `if data is not None` on `text()` will not detect a failure.
 
 ---
 
