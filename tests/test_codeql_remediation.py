@@ -218,6 +218,45 @@ def test_provider_redirect_does_not_forward_authorization(monkeypatch):
     assert requests[0].headers["Authorization"] == "Bearer test-stored-key"
 
 
+def test_whisper_api_key_is_not_sent_over_http(monkeypatch):
+    import httpx
+
+    from providers.stt_whisper import WhisperSTT
+
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={"text": "recognized"})
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+
+    def client_without_redirects(*, timeout, trust_env, follow_redirects):
+        assert follow_redirects is False
+        return real_client(
+            transport=transport,
+            timeout=timeout,
+            trust_env=trust_env,
+            follow_redirects=follow_redirects,
+        )
+
+    monkeypatch.setattr(httpx, "Client", client_without_redirects)
+    plain = WhisperSTT(
+        {"backend": "api", "base_url": "http://127.0.0.1:8000/v1", "api_key": "stored-whisper-key"}
+    )
+    secure = WhisperSTT(
+        {"backend": "api", "base_url": "https://speech.example/v1", "api_key": "stored-whisper-key"}
+    )
+
+    assert plain.probe() == (False, "Whisper API keys are sent only to HTTPS addresses.")
+    assert plain._api_blocking(b"\0" * 3200, 16000) == "recognized"
+    assert secure._api_blocking(b"\0" * 3200, 16000) == "recognized"
+    assert len(requests) == 2
+    assert "Authorization" not in requests[0].headers
+    assert requests[1].headers["Authorization"] == "Bearer stored-whisper-key"
+
+
 def test_redirect_keeps_local_https_authority():
     from starlette.datastructures import URL
 
@@ -284,6 +323,7 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
         "access_token: Bearer xyz.def.ghi Authorization: Basic dXNlcjpwYXNz "
         '{"password": "hunter2", "secret": "a value with spaces", '
         '"token": "plain_token_value", "authToken": "camel_token_value"} '
+        'PASSWORD=prefix" secret tail" '
         "https://url-user:url-password@example.test/path",
     )
     output = capsys.readouterr().out
@@ -297,6 +337,7 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
             "a value with spaces",
             "plain_token_value",
             "camel_token_value",
+            "secret tail",
             "url-user",
             "url-password",
             request_secret,
