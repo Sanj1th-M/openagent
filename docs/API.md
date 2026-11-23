@@ -145,7 +145,7 @@ Worker threads and plugins **must never create or modify Qt widgets directly**. 
 
 ## 3. Remote Dashboard API (`dashboard/server.py`)
 
-The dashboard listens on port **8000** by default. When `dashboard_https` is set to `true` and certificate setup succeeds, it serves HTTPS on port **8001**. A GET request to port 8000 is redirected to `https://<server_lan_ip>:8001` using the server's detected LAN IP rather than the request host; requests through `localhost` or a tunnel may redirect to an unreachable address, so those clients and API clients (including login POST requests) should connect directly to HTTPS on port 8001. If HTTPS is disabled (the default) or certificate setup fails, the dashboard serves plain HTTP on port **8000**.
+The dashboard listens on port **8000** by default. When `dashboard_https` is set to `true` and certificate setup succeeds, it serves HTTPS on port **8001**. A GET request to port 8000 is redirected to `https://<server_lan_ip>:8001` using the server's detected LAN IP rather than the request host. Consequently, local clients should connect directly to `https://localhost:8001`, tunnel clients should route traffic through their public tunnel endpoint forwarding to local port 8001, and API clients (including login POST requests) should target port 8001 (or the tunnel URL) directly instead of hitting the port 8000 GET redirector. If HTTPS is disabled (the default) or certificate setup fails, the dashboard serves plain HTTP on port **8000**.
 
 ### Authentication and transport
 
