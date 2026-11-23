@@ -116,6 +116,8 @@ def _read_for_write() -> dict:
     may be a hand edit with a missing comma, and it still holds the user's key."""
     if not CONFIG_FILE.exists():
         return {}
+    if not _restrict_existing_config_permissions():
+        raise PermissionError("Cannot safely read existing settings; refusing to overwrite them.")
     last = None
     for _ in range(3):
         try:

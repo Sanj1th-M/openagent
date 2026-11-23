@@ -379,6 +379,17 @@ def api_key(refresh: bool = False) -> str:
     """The Gemini key from config/api_keys.json. Cached; never raises."""
     global _cached_key
     with _key_lock:
+        if not _KEY_FILE.exists():
+            _cached_key = ""
+            return _cached_key
+        try:
+            from memory.config_manager import _restrict_existing_config_permissions
+            if not _restrict_existing_config_permissions():
+                _cached_key = ""
+                return _cached_key
+        except Exception:
+            _cached_key = ""
+            return _cached_key
         if _cached_key is not None and not refresh:
             return _cached_key
         try:

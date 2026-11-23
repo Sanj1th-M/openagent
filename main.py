@@ -598,6 +598,13 @@ def _keep_context_of(exc: BaseException) -> bool:
     return True
 
 
+def _tool_call_log_line(name: str, args: dict) -> str:
+    """Avoid logging coding-agent instructions, which may contain credentials."""
+    if name == "dev_agent":
+        return f"[JARVIS] 🔧 {name} [arguments omitted]"
+    return f"[JARVIS] 🔧 {name}  {args}"
+
+
 class JarvisLive:
     def __init__(self, ui: JarvisUI):
         # Platform limits are announced once per run, not once per
@@ -1584,7 +1591,7 @@ class JarvisLive:
         name = fc.name
         args = dict(fc.args or {})
 
-        print(f"[JARVIS] 🔧 {name}  {args}")
+        print(_tool_call_log_line(name, args))
         _t_tool = time.monotonic()
         self.ui.set_state("THINKING")
 

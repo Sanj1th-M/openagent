@@ -398,6 +398,8 @@ def test_loading_config_fails_closed_when_permissions_cannot_be_restricted(
     config_dir.mkdir()
     config_file = config_dir / "api_keys.json"
     config_file.write_text(json.dumps({"gemini_api_key": "legacy-secret"}), encoding="utf-8")
+    config_dir.chmod(0o755)
+    config_file.chmod(0o644)
     monkeypatch.setattr(config_manager, "CONFIG_DIR", config_dir)
     monkeypatch.setattr(config_manager, "CONFIG_FILE", config_file)
 
@@ -408,6 +410,49 @@ def test_loading_config_fails_closed_when_permissions_cannot_be_restricted(
 
     assert config_manager.load_api_keys() == {}
     assert "refusing to load settings" in capsys.readouterr().out
+
+
+def test_provider_updates_abort_when_existing_settings_cannot_be_secured(tmp_path, monkeypatch):
+    from memory import config_manager
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config_file = config_dir / "api_keys.json"
+    original = json.dumps(
+        {
+            "providers": {
+                "mode": "pipeline",
+                "creds": {"openai_compat": {"api_key": "existing-provider-secret"}},
+            }
+        }
+    )
+    config_file.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(config_manager, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(config_manager, "CONFIG_FILE", config_file)
+    monkeypatch.setattr(config_manager, "_restrict_existing_config_permissions", lambda: False)
+
+    with pytest.raises(PermissionError, match="refusing to overwrite"):
+        config_manager.save_provider_mode("gemini")
+
+    assert config_file.read_text(encoding="utf-8") == original
+
+
+def test_gemini_key_reader_does_not_bypass_config_permission_refusal(tmp_path, monkeypatch):
+    from core import gemini
+    from memory import config_manager
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config_file = config_dir / "api_keys.json"
+    config_file.write_text(json.dumps({"gemini_api_key": "disk-sensitive-key"}), encoding="utf-8")
+    monkeypatch.setattr(gemini, "_KEY_FILE", config_file)
+    monkeypatch.setattr(config_manager, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(config_manager, "CONFIG_FILE", config_file)
+    monkeypatch.setattr(gemini, "_cached_key", "cached-sensitive-key")
+    monkeypatch.setattr(config_manager, "_restrict_existing_config_permissions", lambda: False)
+
+    assert gemini.api_key() == ""
+    assert gemini._cached_key == ""
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX ownership and modes are not portable to Windows")
@@ -480,7 +525,10 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
         "postgresql://db-user:db-password@db.example.test/app "
         "postgresql://db.example.test/app "
         "https://example.test?email=alice@example.org "
-        "https://url-user:url-password@example.test/path",
+        "https://url-user:url-password@example.test/path "
+        "https://alice:credential@sensitive_tail@example.test/path "
+        'PASSWORD="unterminated quoted_secret_suffix\n'
+        '--password "unterminated_cli_secret_suffix',
     )
     output = capsys.readouterr().out
     assert "postgresql://db.example.test/app" in output + " ".join(player.logs)
@@ -516,6 +564,9 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
             "db-password",
             "url-user",
             "url-password",
+            "sensitive_tail",
+            "quoted_secret_suffix",
+            "unterminated_cli_secret_suffix",
             request_secret,
         ],
         output,
@@ -523,6 +574,32 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
         json.dumps(dev_agent._job_snapshot()),
         json.dumps(player.snapshots),
     )
+
+
+def test_dev_agent_redacts_credentials_before_preview_truncation():
+    from actions import dev_agent
+
+    quoted_tail = "quoted_secret_after_preview_boundary"
+    output = "x" * 570 + f' password="safe-prefix {quoted_tail}' + ("z" * 40) + '"'
+
+    preview = dev_agent._redacted_preview(output, 600)
+
+    assert len(preview) <= 600
+    assert quoted_tail not in preview
+    assert "[REDACTED]" in preview
+
+
+def test_dev_agent_tool_arguments_are_omitted_from_dispatch_log():
+    from main import _tool_call_log_line
+
+    secret = "dispatch_api_key_secret"
+    args = {"description": f"configure api_key={secret}", "mode": "build"}
+
+    log_line = _tool_call_log_line("dev_agent", args)
+
+    assert "arguments omitted" in log_line
+    assert secret not in log_line
+    assert args["description"].endswith(secret)
 
 
 def test_dev_agent_output_summary_never_contains_project_output(capsys, monkeypatch):

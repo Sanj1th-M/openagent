@@ -627,7 +627,7 @@ def _build_project(
         f"Project is saved at {project_dir} — open it in VSCode and check manually."
     )
     if speak: speak(msg)
-    return f"{msg}\n\nLast error:\n{last_output[:600]}"
+    return f"{msg}\n\nLast error:\n{_redacted_preview(last_output, 600)}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -739,8 +739,25 @@ def _update(status: str | None = None, file: str | None = None,
 def _redact_credentials(msg: str) -> str:
     """Remove common credential formats before text reaches logs or callers."""
     msg = str(msg)
+    credential_labels = (
+        r"api[_-]?key|access[_-]?token|refresh[_-]?token|"
+        r"auth(?:orization|[_-]?token)|token|password|"
+        r"(?:aws[_-]?)?secret[_-]?access[_-]?key|secret|credential|client[_-]?secret"
+    )
     msg = re.sub(
-        r"(?i)\b([a-z][a-z0-9+.-]*://)[^/@?#\s]+@",
+        rf"(?im)((?:\\)?[\"']?(?:{credential_labels})(?:\\)?[\"']?\s*[:=]\s*)"
+        r"([\"'])((?:\\[\s\S]|(?!\2)[^\r\n])*)(?<!\\)$",
+        r"\1[REDACTED]",
+        msg,
+    )
+    msg = re.sub(
+        rf"(?im)(--(?:{credential_labels})(?:=\s*|\s+))([\"'])"
+        r"((?:\\[\s\S]|(?!\2)[^\r\n])*)(?<!\\)$",
+        r"\1[REDACTED]",
+        msg,
+    )
+    msg = re.sub(
+        r"(?i)\b([a-z][a-z0-9+.-]*://)[^/?#\s]+@",
         r"\1[REDACTED]@",
         msg,
     )
@@ -765,6 +782,11 @@ def _redact_credentials(msg: str) -> str:
 def _output_log_summary() -> str:
     """Describe captured project output without copying it into diagnostics."""
     return "Project output captured."
+
+
+def _redacted_preview(value: str, limit: int) -> str:
+    """Redact a complete diagnostic before truncating it for a result preview."""
+    return _redact_credentials(value)[:limit]
 
 
 def _scrub_job_value(value):
