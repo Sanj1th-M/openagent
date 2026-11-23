@@ -57,11 +57,11 @@ The table distinguishes remediated findings from documented false positives. Fal
 
 Local validation on 2026-11-23, after the final application and test changes (GitHub checks for the resulting commit are tracked on PR #4):
 
-- Remediation regressions: 18 passed, 2 skipped.
-- Full `python -m pytest tests/ -q`: 43 passed, 2 skipped. The symlink test skips only when the runner cannot create symlinks; the POSIX file-mode test skips on Windows because POSIX mode semantics do not apply there.
+- Remediation regressions: 19 passed, 2 skipped.
+- Full `python -m pytest tests/ -q`: 44 passed, 2 skipped. The symlink test skips only when the runner cannot create symlinks; the POSIX file-mode test skips on Windows because POSIX mode semantics do not apply there.
 - `python -m providers._tests`: 100 passed, 0 failed.
 - `ruff check tests/ setup.py`, `ruff format --check tests/ setup.py`, and `mypy tests/`: passed.
-- Bandit CI scope (`actions core gui memory plugins main.py ui.py setup.py tests`): no Medium or High issues identified across 35,999 lines.
+- Bandit CI scope (`actions core gui memory plugins main.py ui.py setup.py tests`): no Medium or High issues identified across 36,014 lines.
 - `pip-audit -r requirements.txt`: no known vulnerabilities found.
 - Previous PR head `607149e9a3e62d8c10be06e758d5177efdd56157`: all six Ubuntu/Windows/macOS × Python 3.11/3.12 test jobs passed, as did quality/linting, security auditing, packaging, Bandit and pip-audit. CodeQL reported no new alerts in code changed by the PR; no alerts were dismissed. These checks predate the latest Whisper and redaction changes.
 
