@@ -12,7 +12,6 @@ authors = [
 ]
 readme = "readme.md"
 requires-python = ">=3.11"
-license = "CC-BY-NC-4.0"
 
 [tool.setuptools]
 packages = ["gui", "core", "memory", "actions", "plugins", "providers"]

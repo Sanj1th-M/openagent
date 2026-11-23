@@ -1005,10 +1005,9 @@ Your voice is streamed to Google's Gemini Live API while a session is open; that
 
 ---
 
-## ⚠️ License & Attribution
+## ⚠️ Attribution
 
 Personal and non-commercial use only.
-Licensed under **[Creative Commons BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)**.
 
 This project is adapted from upstream work originally created and published by FatihMakes.
 
