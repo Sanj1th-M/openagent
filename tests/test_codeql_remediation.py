@@ -211,11 +211,52 @@ def test_provider_redirect_does_not_forward_authorization(monkeypatch):
         )
 
     monkeypatch.setattr(httpx, "Client", client_without_redirects)
-    llm.complete([{"role": "user", "content": "hello"}])
+    with pytest.raises(RuntimeError, match="307"):
+        llm.complete([{"role": "user", "content": "hello"}])
 
     assert len(requests) == 1
     assert requests[0].url.host == "generativelanguage.googleapis.com"
     assert requests[0].headers["Authorization"] == "Bearer test-stored-key"
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_provider_chat_rejects_redirect_responses(monkeypatch, stream):
+    import httpx
+
+    llm = OpenAICompatLLM(
+        {"base_url": "https://provider.example/v1", "model": "test-model", "api_key": "test-key"}
+    )
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(
+            307,
+            headers={"Location": "https://attacker.test/collect"},
+            json={"choices": []},
+        )
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.AsyncClient
+
+    def client_without_redirects(*, timeout, trust_env, follow_redirects):
+        assert follow_redirects is False
+        return real_client(
+            transport=transport,
+            timeout=timeout,
+            trust_env=trust_env,
+            follow_redirects=follow_redirects,
+        )
+
+    monkeypatch.setattr(httpx, "AsyncClient", client_without_redirects)
+
+    async def collect():
+        return [item async for item in llm.chat([], stream=stream)]
+
+    with pytest.raises(RuntimeError, match="307"):
+        asyncio.run(collect())
+    assert len(requests) == 1
+    assert requests[0].url.host == "provider.example"
 
 
 def test_whisper_api_key_is_not_sent_over_http(monkeypatch):
@@ -255,6 +296,44 @@ def test_whisper_api_key_is_not_sent_over_http(monkeypatch):
     assert len(requests) == 2
     assert "Authorization" not in requests[0].headers
     assert requests[1].headers["Authorization"] == "Bearer stored-whisper-key"
+
+
+def test_whisper_rejects_redirect_responses(monkeypatch):
+    import httpx
+
+    from providers.stt_whisper import WhisperSTT
+
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(
+            307,
+            headers={"Location": "https://attacker.test/collect"},
+            json={"text": "unexpected success"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+
+    def client_without_redirects(*, timeout, trust_env, follow_redirects):
+        assert follow_redirects is False
+        return real_client(
+            transport=transport,
+            timeout=timeout,
+            trust_env=trust_env,
+            follow_redirects=follow_redirects,
+        )
+
+    monkeypatch.setattr(httpx, "Client", client_without_redirects)
+    whisper = WhisperSTT(
+        {"backend": "api", "base_url": "https://speech.example/v1", "api_key": "test-key"}
+    )
+
+    with pytest.raises(RuntimeError, match="307"):
+        whisper._api_blocking(b"\0" * 3200, 16000)
+    assert len(requests) == 1
+    assert requests[0].url.host == "speech.example"
 
 
 def test_redirect_keeps_local_https_authority():
@@ -373,6 +452,7 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
         '--password cli-prefix" cli mixed secret" '
         "--password cli-prefix\\ cli_escaped_suffix "
         "--password \\\ncli_continuation_secret_43 command "
+        'JSON fields: {"password": "json_secret_value", "status": "failed"} '
         'escaped JSON: {\\"password\\": \\"escaped secret value\\"} '
         "postgresql://db-user:db-password@db.example.test/app "
         "postgresql://db.example.test/app "
@@ -382,6 +462,7 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
     output = capsys.readouterr().out
     assert "postgresql://db.example.test/app" in output + " ".join(player.logs)
     assert "https://example.test?email=alice@example.org" in output + " ".join(player.logs)
+    assert '"status": "failed"}' in output + " ".join(player.logs)
     _assert_secrets_absent(
         [
             "sk-abcdefghijklmnopqrstuvwxyz",
@@ -389,6 +470,7 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
             "xyz.def.ghi",
             "dXNlcjpwYXNz",
             "hunter2",
+            "json_secret_value",
             "a value with spaces",
             "plain_token_value",
             "camel_token_value",

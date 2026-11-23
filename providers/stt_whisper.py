@@ -220,7 +220,7 @@ class WhisperSTT:
             r = cl.post(f"{base}/audio/transcriptions", headers=headers,
                         data=data,
                         files={"file": ("speech.wav", wav, "audio/wav")})
-            if r.status_code >= 400:
+            if not 200 <= r.status_code < 300:
                 raise RuntimeError(f"{r.status_code} {_terse(r.text)}")
             payload = r.json()
         # The hosted endpoint reports no confidence, so a language it names is

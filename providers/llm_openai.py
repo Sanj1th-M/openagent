@@ -495,7 +495,7 @@ class OpenAICompatLLM:
                 r = cl.post(f"{self.base}/chat/completions",
                             headers=self._headers(),
                             json=self._body(messages, tools, False, temperature))
-                if r.status_code >= 400:
+                if not 200 <= r.status_code < 300:
                     raise RuntimeError(f"{r.status_code} {_terse(r.text)}")
                 data = r.json()
         except Exception as e:
@@ -529,7 +529,7 @@ class OpenAICompatLLM:
             if not stream:
                 r = await cl.post(f"{self.base}/chat/completions",
                                   headers=self._headers(), json=body)
-                if r.status_code >= 400:
+                if not 200 <= r.status_code < 300:
                     raise RuntimeError(f"{r.status_code} {_terse(r.text)}")
                 msg = ((r.json().get("choices") or [{}])[0].get("message") or {})
                 if msg.get("content"):
@@ -590,7 +590,7 @@ class OpenAICompatLLM:
                 req["reasoning_effort"] = "none" if "lite" in model else "low"
             async with cl.stream("POST", f"{self.base}/chat/completions",
                                  headers=self._headers(), json=req) as r:
-                if r.status_code < 400:
+                if 200 <= r.status_code < 300:
                     yield r
                     return
                 last = f"{r.status_code} {_terse((await r.aread()).decode('utf-8', 'replace'))}"
@@ -608,7 +608,8 @@ class OpenAICompatLLM:
                                 trust_env=self._trust_env,
                                 follow_redirects=False) as cl:
             r = cl.get(f"{self.base}/models", headers=self._headers())
-            r.raise_for_status()
+            if not 200 <= r.status_code < 300:
+                raise RuntimeError(f"{r.status_code} {_terse(r.text)}")
             data = r.json()
         rows = data.get("data") if isinstance(data, dict) else data
         return sorted({str(m.get("id")) for m in (rows or []) if m.get("id")})
