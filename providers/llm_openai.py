@@ -206,6 +206,15 @@ def _uses_host(url: str, hostname: str) -> bool:
         return False
 
 
+def _uses_https_host(url: str, hostname: str) -> bool:
+    """Match an exact hostname only when the URL protects credentials in transit."""
+    try:
+        parsed = urlsplit(url)
+        return parsed.scheme.lower() == "https" and parsed.hostname == hostname
+    except ValueError:
+        return False
+
+
 def _int_or(value, default):
     """A number out of a settings field, where "" and "0" both mean "not set".
 
@@ -369,7 +378,9 @@ class OpenAICompatLLM:
         self.base = _normalise(cfg.get("base_url") or "")
         self.model = (cfg.get("model") or "").strip()
         self.key = (cfg.get("api_key") or "").strip()
-        if not self.key and _uses_host(self.base, "generativelanguage.googleapis.com"):
+        if not self.key and _uses_https_host(
+            self.base, "generativelanguage.googleapis.com"
+        ):
             # The Gemini entry needs no second key: the one Gemini Live already
             # uses is the natural choice, and a different key pasted here is how
             # a free-tier project ends up behind a paid one (20 requests a day).

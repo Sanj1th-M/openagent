@@ -127,6 +127,29 @@ def test_spoofed_gemini_host_does_not_select_gemini_behavior():
     assert "reasoning_effort" not in llm._body([], None, False, None)
 
 
+def test_gemini_key_reuse_requires_https(monkeypatch):
+    from memory import config_manager
+
+    monkeypatch.setattr(config_manager, "get_gemini_key", lambda: "stored-secret")
+    http_llm = OpenAICompatLLM(
+        {
+            "base_url": "http://GENERATIVELANGUAGE.GOOGLEAPIS.COM/v1beta/openai",
+            "model": "gemini-3.5-flash",
+            "api_key": "",
+        }
+    )
+    https_llm = OpenAICompatLLM(
+        {
+            "base_url": "https://GENERATIVELANGUAGE.GOOGLEAPIS.COM/v1beta/openai",
+            "model": "gemini-3.5-flash",
+            "api_key": "",
+        }
+    )
+
+    assert http_llm.key == ""
+    assert https_llm.key == "stored-secret"
+
+
 def test_redirect_keeps_local_https_authority():
     from starlette.datastructures import URL
 
@@ -164,8 +187,14 @@ def test_config_is_written_with_owner_only_permissions(tmp_path, monkeypatch):
 def test_dev_agent_log_redacts_common_credentials(capsys):
     from actions.dev_agent import _log
 
-    _log(None, "api_key=sk-abcdefghijklmnopqrstuvwxyz Bearer abc.def.ghi")
+    _log(
+        None,
+        "api_key=sk-abcdefghijklmnopqrstuvwxyz Bearer abc.def.ghi "
+        '{"password": "hunter2", "secret": "a value with spaces"}',
+    )
     output = capsys.readouterr().out
     assert "sk-abcdefghijklmnopqrstuvwxyz" not in output
     assert "Bearer abc.def.ghi" not in output
-    assert output.count("[REDACTED]") >= 2
+    assert "hunter2" not in output
+    assert "a value with spaces" not in output
+    assert output.count("[REDACTED]") >= 4

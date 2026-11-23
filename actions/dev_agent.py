@@ -734,8 +734,8 @@ def _log(player, msg: str) -> None:
     # common credential forms out of the console, activity panel and snapshots.
     msg = str(msg)
     msg = re.sub(
-        r"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|credential)"
-        r"(\s*[:=]\s*)([^\s,;]+)",
+        r"""(?i)(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|credential)["']?)"""
+        r"""(\s*[:=]\s*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,;]+)""",
         r"\1\2[REDACTED]", msg,
     )
     msg = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", msg)

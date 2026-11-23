@@ -1038,9 +1038,10 @@ def test_panel_settings_survive():
         def counted(src, dst, *a, **k):
             # Count the atomic replacement of the settings file. Its secure
             # temporary filename is intentionally randomized by mkstemp.
+            result = real(src, dst, *a, **k)
             if Path(dst) == config_manager.CONFIG_FILE:
                 writes[0] += 1
-            return real(src, dst, *a, **k)
+            return result
 
         config_manager.os.replace = counted
         try:
