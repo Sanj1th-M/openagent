@@ -32,9 +32,12 @@ except ImportError:
 # python-multipart is required for file uploads — optional dependency
 _UPLOAD_OK = False
 try:
+    # FastAPI's File symbols import without the multipart parser, but registering
+    # a File(...) route then raises during app construction. Check the parser.
+    import multipart  # noqa: F401
     from fastapi import UploadFile, File as FastAPIFile
     _UPLOAD_OK = True
-except Exception:
+except ImportError:
     pass
 
 BASE_DIR    = Path(__file__).resolve().parent.parent
