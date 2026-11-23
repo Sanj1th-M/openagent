@@ -89,7 +89,7 @@ When processing external web content, search summaries, or third-party files:
 - **Git Shield**: `config/api_keys.json` is registered in `.gitignore`.
 - **Atomic File Serialization**: Uses a same-directory temporary file with `os.replace` to prevent race-condition data leakage or configuration wiping. Temporary files are created with owner-only POSIX permissions before the replacement.
 - **Provider Credential Transport**: OpenAI-compatible LLM and hosted Whisper providers add an Authorization header only for HTTPS endpoints. Plain HTTP endpoints remain usable without credentials (including typical local model servers); use HTTPS for a configured API key. These provider HTTP clients do not follow redirects, preventing authorization headers from being forwarded to a redirect target.
-- **Diagnostic Redaction**: Coding-agent logs, job state snapshots, and completion/failure text redact common Bearer/Basic credentials, labeled API key/token/password fields, and URL user-info before they reach the console or UI. This is pattern-based defense in depth and cannot identify every arbitrary secret string.
+- **Diagnostic Redaction**: Coding-agent logs, job state snapshots, and completion/failure text redact common Bearer/Basic credentials, labeled API key/token/password fields, and URL user-info before they reach the console or UI. Project output logs report capture status without copying raw program output. Redaction is pattern-based defense in depth and cannot identify every arbitrary secret string.
 
 ---
 

@@ -576,7 +576,7 @@ def _build_project(
     for attempt in range(1, MAX_FIX_ATTEMPTS + 1):
         log(f"Running project (attempt {attempt}/{MAX_FIX_ATTEMPTS})...")
         last_output = _run_project(run_command, project_dir, timeout)
-        log(f"Output preview: {_redacted_preview(last_output)}")
+        log(_output_log_summary())
 
         if not _has_error(last_output, run_command):
             msg = (
@@ -762,9 +762,9 @@ def _redact_credentials(msg: str) -> str:
     return msg
 
 
-def _redacted_preview(msg: str, limit: int = 150) -> str:
-    """Redact complete diagnostic text before truncating its UI preview."""
-    return _redact_credentials(msg)[:limit]
+def _output_log_summary() -> str:
+    """Describe captured project output without copying it into diagnostics."""
+    return "Project output captured."
 
 
 def _scrub_job_value(value):

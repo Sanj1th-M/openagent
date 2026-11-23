@@ -373,18 +373,16 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
     )
 
 
-def test_dev_agent_redacts_complete_output_before_preview_truncation(capsys, monkeypatch):
+def test_dev_agent_output_summary_never_contains_project_output(capsys, monkeypatch):
     from actions import dev_agent
 
     monkeypatch.setattr(dev_agent, "_JOB", {"started": time.time(), "steps": [], "finished": None})
     monkeypatch.setattr(dev_agent, "_player_ref", None)
     player = _RecordingPlayer()
     secret_suffix = "preview_secret_suffix"
-    full_output = f'password="first {secret_suffix} ' + ("x" * 200) + '"'
-
-    preview = dev_agent._redacted_preview(full_output)
-    assert len(preview) <= 150
-    dev_agent._log(player, f"Output preview: {preview}")
+    summary = dev_agent._output_log_summary()
+    assert summary == "Project output captured."
+    dev_agent._log(player, summary)
 
     output = capsys.readouterr().out
     _assert_secrets_absent([secret_suffix], output, player.logs, dev_agent._JOB["steps"])
