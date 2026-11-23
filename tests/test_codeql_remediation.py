@@ -116,7 +116,10 @@ def test_provider_detection_matches_parsed_hostname_only():
     )
 
 
-def test_spoofed_gemini_host_does_not_select_gemini_behavior():
+def test_spoofed_gemini_host_does_not_select_gemini_behavior(monkeypatch):
+    from memory import config_manager
+
+    monkeypatch.setattr(config_manager, "get_gemini_key", lambda: "stored-secret")
     llm = OpenAICompatLLM(
         {
             "base_url": "https://generativelanguage.googleapis.com.attacker.test/v1",
