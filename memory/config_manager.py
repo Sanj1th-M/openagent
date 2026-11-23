@@ -38,10 +38,14 @@ def _restrict_existing_config_permissions() -> bool:
             current = path.stat()
             if current.st_uid != owner:
                 raise PermissionError("settings path is not owned by the current user")
-            if stat.S_IMODE(current.st_mode) != mode:
+            current_mode = stat.S_IMODE(current.st_mode)
+            required_access = stat.S_IXUSR if path == CONFIG_DIR else stat.S_IRUSR
+            if current_mode & 0o077 or current_mode & required_access != required_access:
                 os.chmod(path, mode)
                 current = path.stat()
-                if current.st_uid != owner or stat.S_IMODE(current.st_mode) != mode:
+                current_mode = stat.S_IMODE(current.st_mode)
+                if (current.st_uid != owner or current_mode & 0o077
+                        or current_mode & required_access != required_access):
                     raise PermissionError("settings path permissions could not be verified")
     except OSError:
         print("[Config] Cannot secure api_keys.json permissions; refusing to load settings.")

@@ -418,8 +418,8 @@ def test_loading_protected_config_does_not_chmod_read_only_paths(tmp_path, monke
     config_dir.mkdir(mode=0o700)
     config_file = config_dir / "api_keys.json"
     config_file.write_text(json.dumps({"gemini_api_key": "legacy-secret"}), encoding="utf-8")
-    config_dir.chmod(0o700)
-    config_file.chmod(0o600)
+    config_dir.chmod(0o500)
+    config_file.chmod(0o400)
     monkeypatch.setattr(config_manager, "CONFIG_DIR", config_dir)
     monkeypatch.setattr(config_manager, "CONFIG_FILE", config_file)
 
