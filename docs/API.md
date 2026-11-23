@@ -139,7 +139,7 @@ Worker threads and plugins **must never create or modify Qt widgets directly**. 
 | `player.show_content(title: str, text: str)` | Displays formatted text or report in the lower content panel. |
 | `player.show_quiz(topic: str, questions: list[dict], grade=None)` | Renders an interactive quiz dialog on the Qt main thread. |
 | `player.show_review(title: str, summary: str, findings: list)` | Displays a structured review view. |
-| `player.show_video(path_or_url: str, title: str)` | Plays a video file or stream in the HUD media viewport. |
+| `player.show_video(source: str, title: str = "")` | Plays a video file or stream in the HUD media viewport. |
 
 ---
 

@@ -6,7 +6,7 @@ This document describes packaging, distribution artifacts, release workflows, an
 
 ## 1. Application Packaging Architecture
 
-openagent is distributed as a standard Python package with source distributions (`.tar.gz`) and platform-independent wheels (`.whl`), packaged using standard PEP 517/518 build tooling.
+openagent is distributed as a standard Python package with source distributions (`.tar.gz`) and platform-independent wheels (`.whl`), packaged using standard PEP 517/518 build tooling. Note that binary wheels do not include the remote mobile dashboard (`dashboard/`); running the dashboard requires a full source checkout.
 
 ### Packaging Configuration (`pyproject.toml` & `setup.py`)
 - **Build Backend**: `setuptools.build_meta`
@@ -78,7 +78,7 @@ If deploying on a local home server or headless desktop machine to serve the rem
 > **Headless Initial Setup Prerequisite**: On a fresh installation, `main.py` checks `config/api_keys.json` for `os_system` and a valid engine configuration (`gemini_api_key`, `local_only: true`, or `providers.mode: "pipeline"`). If absent, `main.py` displays a graphical `SetupOverlay` and pauses startup at `ui.wait_for_api_key()`. In offscreen mode (`QT_QPA_PLATFORM=offscreen`), this overlay cannot be interacted with, which prevents `DashboardServer.serve()` from starting.
 >
 > To deploy in headless mode, you must satisfy the initial configuration prerequisite before launching offscreen:
-> 1. **Option A (Pre-configured JSON)**: Create or edit `config/api_keys.json` with `"os_system": "linux"` (or `"windows"` / `"darwin"`) and your engine preference (e.g. `"local_only": true` or `"gemini_api_key": "YOUR_KEY"`).
+> 1. **Option A (Pre-configured JSON)**: Create or edit `config/api_keys.json` with `"os_system": "linux"` (or `"windows"` / `"darwin"`) and an initial engine configuration (e.g. `"local_only": true` or `"gemini_api_key": "YOUR_KEY"`). This satisfies the initial startup setup gate and allows `DashboardServer.serve()` to start in offscreen mode. If `"local_only": true` is used, note that running an active assistant pipeline additionally requires configuring provider models under `"providers"` (or configuring a valid `"gemini_api_key"`).
 > 2. **Option B (Desktop Setup First)**: Run `python main.py` once with an active display and complete the initial setup dialog before moving the configuration to the headless host. This satisfies the startup configuration check only; it does not create a persistent dashboard pairing PIN.
 
 > [!WARNING]
@@ -92,7 +92,7 @@ python main.py
 
 #### Dashboard Protocol & TLS Behavior
 - **Default (Plain HTTP)**: When `"dashboard_https"` is unset or `false` in `config/api_keys.json`, `DashboardServer.serve()` starts on **plain HTTP on port 8000**. Network traffic is unencrypted (though authentication remains gated by the pairing code).
-- **Enabling HTTPS**: Set `"dashboard_https": true` in `config/api_keys.json` (and ensure `cryptography` is installed). The server automatically generates a self-signed TLS certificate in `config/certs/`, serves HTTPS on port 8001, and runs an HTTP-to-HTTPS redirector on port 8000. Clients must accept the self-signed certificate once per device.
+- **Enabling HTTPS**: Set `"dashboard_https": true` in `config/api_keys.json` (and ensure `cryptography` is installed). The server automatically generates a self-signed TLS certificate in `config/certs/`, serves HTTPS on port 8001, and runs an HTTP-to-HTTPS redirector on port 8000. The port 8000 redirector handles GET requests only and redirects to the server's detected LAN IP; direct API clients, including clients connecting via `localhost` or a tunnel, must connect to HTTPS directly on port 8001. Clients must accept the self-signed certificate once per device.
 - **Certificate Fallback**: If certificate generation fails (e.g. `cryptography` is missing or directory creation fails), the server logs a warning and falls back to plain HTTP on port 8000 rather than aborting.
 
 ---
