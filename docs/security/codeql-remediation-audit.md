@@ -47,9 +47,9 @@ The table distinguishes remediated findings from documented false positives. Fal
 - `dashboard/server.py`: confined upload downloads, safely encoded inline script values, generic upload errors, and a locally pinned HTTPS redirect destination.
 - `providers/llm_openai.py`: exact parsed-host checks for Gemini and MiniMax provider-specific behavior.
 - `providers/stt_whisper.py`: hosted transcription validates HTTP(S) endpoints, withholds configured API keys on HTTP, and disables redirects.
-- `core/gemini.py`, `main.py`, `core/audio_devices.py`, `actions/dev_agent.py`: removed raw exception, device, model, or credential-like values from affected logs; the coding-agent logger redacts common credential formats, including mixed quoting, CLI options, and URI user-info.
+- `core/gemini.py`, `main.py`, `core/audio_devices.py`, `actions/dev_agent.py`: removed raw exception, device, model, or credential-like values from affected logs; the coding-agent logger redacts common credential formats, including mixed quoting, escaped characters, line continuations, CLI options, and URI user-info.
 - `memory/config_manager.py`: private POSIX config directory/file modes and restrictive same-directory temporary writes.
-- `tests/test_codeql_remediation.py`: regression coverage for path traversal, symlink escape, HTML/script encoding, URL host spoofing, redirect authority, HTTP credential withholding, upload exception disclosure, config permissions, and log redaction including mixed quoted/unquoted assignments, CLI credentials, and database URLs.
+- `tests/test_codeql_remediation.py`: regression coverage for path traversal, symlink escape, HTML/script encoding, URL host spoofing, redirect authority, HTTP credential withholding, upload exception disclosure, config permissions, and log redaction including mixed quoted/unquoted assignments, escaped characters and line continuations, CLI credentials, and database URLs.
 - `requirements.txt`, `actions/file_processor.py`, and `core/cloud.py`: removed the vulnerable PyPDF2 fallback and retained the existing `pypdf` fallback at version 3.9.0 or newer. This followed a dependency audit finding for crafted PDFs that could cause an infinite loop; the upstream advisory lists PyPDF2 3.0.1 as affected and pypdf 3.9.0 as patched ([GHSA-4vvm-4w3v-6mr8](https://github.com/advisories/GHSA-4vvm-4w3v-6mr8)).
 - `docs/SECURITY.md`, `docs/CONFIGURATION.md`: documented the updated path, permission, and storage behavior.
 
@@ -61,7 +61,7 @@ Local validation on 2026-11-23, after the final application and test changes (Gi
 - Full `python -m pytest tests/ -q`: 43 passed, 2 skipped. The symlink test skips only when the runner cannot create symlinks; the POSIX file-mode test skips on Windows because POSIX mode semantics do not apply there.
 - `python -m providers._tests`: 100 passed, 0 failed.
 - `ruff check tests/ setup.py`, `ruff format --check tests/ setup.py`, and `mypy tests/`: passed.
-- Bandit CI scope (`actions core gui memory plugins main.py ui.py setup.py tests`): no Medium or High issues identified across 35,983 lines.
+- Bandit CI scope (`actions core gui memory plugins main.py ui.py setup.py tests`): no Medium or High issues identified across 35,999 lines.
 - `pip-audit -r requirements.txt`: no known vulnerabilities found.
 - Previous PR head `607149e9a3e62d8c10be06e758d5177efdd56157`: all six Ubuntu/Windows/macOS × Python 3.11/3.12 test jobs passed, as did quality/linting, security auditing, packaging, Bandit and pip-audit. CodeQL reported no new alerts in code changed by the PR; no alerts were dismissed. These checks predate the latest Whisper and redaction changes.
 
