@@ -291,6 +291,46 @@ def test_config_is_written_with_owner_only_permissions(tmp_path, monkeypatch):
     assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes are not portable to Windows")
+def test_loading_existing_config_restricts_permissions_before_read(tmp_path, monkeypatch):
+    from memory import config_manager
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(mode=0o755)
+    config_file = config_dir / "api_keys.json"
+    config_file.write_text(json.dumps({"gemini_api_key": "legacy-secret"}), encoding="utf-8")
+    config_dir.chmod(0o755)
+    config_file.chmod(0o644)
+    monkeypatch.setattr(config_manager, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(config_manager, "CONFIG_FILE", config_file)
+
+    assert config_manager.load_api_keys() == {"gemini_api_key": "legacy-secret"}
+    assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
+    assert stat.S_IMODE(config_file.stat().st_mode) == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes are not portable to Windows")
+def test_loading_config_fails_closed_when_permissions_cannot_be_restricted(
+    tmp_path, monkeypatch, capsys
+):
+    from memory import config_manager
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config_file = config_dir / "api_keys.json"
+    config_file.write_text(json.dumps({"gemini_api_key": "legacy-secret"}), encoding="utf-8")
+    monkeypatch.setattr(config_manager, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(config_manager, "CONFIG_FILE", config_file)
+
+    def deny_chmod(*_args, **_kwargs):
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr(config_manager.os, "chmod", deny_chmod)
+
+    assert config_manager.load_api_keys() == {}
+    assert "refusing to load settings" in capsys.readouterr().out
+
+
 class _RecordingPlayer:
     def __init__(self):
         self.logs = []
@@ -324,10 +364,12 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
         '{"password": "hunter2", "secret": "a value with spaces", '
         '"token": "plain_token_value", "authToken": "camel_token_value"} '
         'PASSWORD=prefix" secret tail" '
+        "PASSWORD=,env_private_value "
         "PASSWORD=prefix\\ assignment_escaped_suffix "
         "PASSWORD=\\\ncontinuation_secret_42 command "
         'PASSWORD="quoted-prefix\\\nquoted_continuation_secret" '
         '--password cli-password --api-key "cli key secret" ordinary-argument '
+        "--password ,cli_private_value "
         '--password cli-prefix" cli mixed secret" '
         "--password cli-prefix\\ cli_escaped_suffix "
         "--password \\\ncli_continuation_secret_43 command "
@@ -351,10 +393,12 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
             "plain_token_value",
             "camel_token_value",
             "secret tail",
+            "env_private_value",
             "assignment_escaped_suffix",
             "continuation_secret_42",
             "quoted_continuation_secret",
             "cli-password",
+            "cli_private_value",
             "cli key secret",
             "cli mixed secret",
             "cli_escaped_suffix",
@@ -386,6 +430,26 @@ def test_dev_agent_output_summary_never_contains_project_output(capsys, monkeypa
 
     output = capsys.readouterr().out
     _assert_secrets_absent([secret_suffix], output, player.logs, dev_agent._JOB["steps"])
+
+
+def test_dev_agent_run_command_diagnostic_omits_credentials(capsys, monkeypatch, tmp_path):
+    from actions import dev_agent
+
+    observed = []
+
+    def fake_run(parts, **kwargs):
+        observed.extend(parts)
+        return dev_agent.subprocess.CompletedProcess(parts, 0, "ok", "")
+
+    monkeypatch.setattr(dev_agent.subprocess, "run", fake_run)
+    secret = "command_password_123"
+    command = f"python main.py --password {secret}"
+
+    assert dev_agent._run_project(command, tmp_path) == "STDOUT:\nok"
+    output = capsys.readouterr().out
+    assert "Running project command." in output
+    assert secret not in output
+    assert secret in observed
 
 
 def test_dev_agent_failed_job_results_are_redacted(tmp_path, monkeypatch):

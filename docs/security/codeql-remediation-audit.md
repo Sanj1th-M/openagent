@@ -40,7 +40,7 @@ The table distinguishes remediated findings from documented false positives. Fal
 | 4 | High | `py/clear-text-logging-sensitive-data` — `core/cloud.py:158` | Same intentional pairing-code display as #5. The `--pair-code` flow is explicitly invoked by the local operator. | No code change: the value must be shown to complete pairing. It can be rotated and is not printed during normal service operation. | False positive (explicit local pairing-code display) |
 | 3 | High | `py/clear-text-logging-sensitive-data` — `core/audio_devices.py:417` | False positive for the saved device label, which is a local audio setting rather than a credential. The adjacent exception path also exposed raw driver details and was cleaned up. | The saved device name and raw exception text were removed; the message retains direction and fallback information. | False positive (local device label; diagnostic reduced) |
 | 2 | High | `py/clear-text-logging-sensitive-data` — `providers/_tests.py:55` | False positive for the audited test harness. `detail` is produced by local provider self-tests and in-process mock responses; the harness documents that it does not use the network or API keys. | Kept the failure detail because it is useful to diagnose failing local tests and does not contain a secret source in this harness. No rule was suppressed. | False positive (local mock test diagnostics) |
-| 1 | High | `py/clear-text-storage-sensitive-data` — `memory/config_manager.py:52` | Genuine residual risk. Source: API and plugin credentials in the settings dictionary. Sink: JSON serialization to local disk. `.gitignore` prevents accidental commits but does not encrypt local storage. | Writes now use owner-only POSIX directory/file permissions and a restrictive temporary file; Windows uses the config directory's inherited ACL. The values remain plaintext to preserve the established single-file settings and backup format. A secure OS-backed credential store or an approved encryption key lifecycle is still required for full at-rest protection. | Not fixed (plaintext remains; filesystem access is narrowed) |
+| 1 | High | `py/clear-text-storage-sensitive-data` — `memory/config_manager.py:52` | Genuine residual risk. Source: API and plugin credentials in the settings dictionary. Sink: JSON serialization to local disk. `.gitignore` prevents accidental commits but does not encrypt local storage. | Existing POSIX config directories/files are restricted before credentials are read; reads fail closed if permissions cannot be restricted. Writes use owner-only modes and a restrictive temporary file. Windows uses the config directory's inherited ACL. Values remain plaintext to preserve the established single-file settings and backup format. A secure OS-backed credential store or approved encryption key lifecycle is still required for full at-rest protection. | Not fixed (plaintext remains; filesystem access is narrowed) |
 
 ## Changes made
 
@@ -48,7 +48,7 @@ The table distinguishes remediated findings from documented false positives. Fal
 - `providers/llm_openai.py`: exact parsed-host checks for Gemini and MiniMax provider-specific behavior.
 - `providers/stt_whisper.py`: hosted transcription validates HTTP(S) endpoints, withholds configured API keys on HTTP, and disables redirects.
 - `core/gemini.py`, `main.py`, `core/audio_devices.py`, `actions/dev_agent.py`: removed raw exception, device, model, or credential-like values from affected logs; the coding-agent logger redacts common credential formats, including mixed quoting, escaped characters, line continuations, CLI options, and URI user-info. Project output logs record capture status without copying raw output.
-- `memory/config_manager.py`: private POSIX config directory/file modes and restrictive same-directory temporary writes.
+- `memory/config_manager.py`: restricts existing POSIX config directory/file modes before credential reads and fails closed if it cannot; writes use restrictive same-directory temporary files.
 - `tests/test_codeql_remediation.py`: regression coverage for path traversal, symlink escape, HTML/script encoding, URL host spoofing, redirect authority, HTTP credential withholding, upload exception disclosure, config permissions, and log redaction including mixed quoted/unquoted assignments, escaped characters and line continuations, CLI credentials, and database URLs.
 - `requirements.txt`, `actions/file_processor.py`, and `core/cloud.py`: removed the vulnerable PyPDF2 fallback and retained the existing `pypdf` fallback at version 3.9.0 or newer. This followed a dependency audit finding for crafted PDFs that could cause an infinite loop; the upstream advisory lists PyPDF2 3.0.1 as affected and pypdf 3.9.0 as patched ([GHSA-4vvm-4w3v-6mr8](https://github.com/advisories/GHSA-4vvm-4w3v-6mr8)).
 - `docs/SECURITY.md`, `docs/CONFIGURATION.md`: documented the updated path, permission, and storage behavior.
@@ -57,11 +57,11 @@ The table distinguishes remediated findings from documented false positives. Fal
 
 Local validation on 2026-11-23, after the final application and test changes (GitHub checks for the resulting commit are tracked on PR #4):
 
-- Remediation regressions: 19 passed, 2 skipped.
-- Full `python -m pytest tests/ -q`: 44 passed, 2 skipped. The symlink test skips only when the runner cannot create symlinks; the POSIX file-mode test skips on Windows because POSIX mode semantics do not apply there.
+- Remediation regressions: 20 passed, 4 skipped.
+- Full `python -m pytest tests/ -q`: 45 passed, 4 skipped. Symlink and POSIX permission cases skip where the host cannot provide the required POSIX modes or symlink privileges.
 - `python -m providers._tests`: 100 passed, 0 failed.
 - `ruff check tests/ setup.py`, `ruff format --check tests/ setup.py`, and `mypy tests/`: passed.
-- Bandit CI scope (`actions core gui memory plugins main.py ui.py setup.py tests`): no Medium or High issues identified across 36,013 lines.
+- Bandit CI scope (`actions core gui memory plugins main.py ui.py setup.py tests`): no Medium or High issues identified across 36,074 lines.
 - `pip-audit -r requirements.txt`: no known vulnerabilities found.
 - Previous PR head `607149e9a3e62d8c10be06e758d5177efdd56157`: all six Ubuntu/Windows/macOS × Python 3.11/3.12 test jobs passed, as did quality/linting, security auditing, packaging, Bandit and pip-audit. CodeQL reported no new alerts in code changed by the PR; no alerts were dismissed. These checks predate the latest Whisper and redaction changes.
 

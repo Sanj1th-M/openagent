@@ -24,6 +24,19 @@ def ensure_config_dir() -> None:
         # umask from the process when creating the settings directory.
         os.chmod(CONFIG_DIR, stat.S_IRWXU)
 
+
+def _restrict_existing_config_permissions() -> bool:
+    """Secure existing POSIX settings before opening credential contents."""
+    if os.name == "nt":
+        return True
+    try:
+        os.chmod(CONFIG_DIR, stat.S_IRWXU)
+        os.chmod(CONFIG_FILE, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        print("[Config] Cannot secure api_keys.json permissions; refusing to load settings.")
+        return False
+    return True
+
 def config_exists() -> bool:
     return CONFIG_FILE.exists()
 
@@ -117,6 +130,8 @@ def save_api_keys(gemini_api_key: str) -> None:
 
 def load_api_keys() -> dict:
     if not CONFIG_FILE.exists():
+        return {}
+    if not _restrict_existing_config_permissions():
         return {}
     for attempt in range(3):
         try:

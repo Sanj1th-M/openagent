@@ -319,7 +319,7 @@ def _open_vscode(project_dir: Path) -> bool:
     return False
 
 def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
-    print(f"[DevAgent] 🚀 Running: {run_command}")
+    print("[DevAgent] 🚀 Running project command.")
     try:
         parts = run_command.split()
         if parts[0].lower() == "python":
@@ -748,13 +748,13 @@ def _redact_credentials(msg: str) -> str:
     msg = re.sub(r"(?i)\bBasic\s+[A-Za-z0-9+/]+={0,2}", "Basic [REDACTED]", msg)
     msg = re.sub(
         r"(?i)(--(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization|[_-]?token)?|token|password|secret|credential|client[_-]?secret)(?:=\s*|\s+))"
-        r"""((?:"(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'|(?:\\[\s\S]|[^\s,;]))+)""",
+        r"""((?:"(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'|(?:\\[\s\S]|[^\s]))+)""",
         r"\1[REDACTED]",
         msg,
     )
     msg = re.sub(
         r"""(?i)((?:\\)?["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization|[_-]?token)|token|password|secret|credential|client[_-]?secret)(?:\\)?["']?)"""
-        r"""(\s*[:=]\s*)((?:\\?"(?:[^"\\]|\\[\s\S])*\\?"|\\?'(?:[^'\\]|\\[\s\S])*\\?'|(?:\\[\s\S]|[^\s,;]))+)""",
+        r"""(\s*[:=]\s*)((?:\\?"(?:[^"\\]|\\[\s\S])*\\?"|\\?'(?:[^'\\]|\\[\s\S])*\\?'|(?:\\[\s\S]|[^\s]))+)""",
         r"\1\2[REDACTED]", msg,
     )
     msg = re.sub(r"\bAIza[0-9A-Za-z_-]{20,}\b", "[REDACTED]", msg)
