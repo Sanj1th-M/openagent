@@ -325,6 +325,7 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
         '"token": "plain_token_value", "authToken": "camel_token_value"} '
         'PASSWORD=prefix" secret tail" '
         '--password cli-password --api-key "cli key secret" ordinary-argument '
+        '--password cli-prefix" cli mixed secret" '
         'escaped JSON: {\\"password\\": \\"escaped secret value\\"} '
         "postgresql://db-user:db-password@db.example.test/app "
         "postgresql://db.example.test/app "
@@ -345,6 +346,7 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
             "secret tail",
             "cli-password",
             "cli key secret",
+            "cli mixed secret",
             "escaped secret value",
             "db-user",
             "db-password",

@@ -748,7 +748,7 @@ def _redact_credentials(msg: str) -> str:
     msg = re.sub(r"(?i)\bBasic\s+[A-Za-z0-9+/]+={0,2}", "Basic [REDACTED]", msg)
     msg = re.sub(
         r"(?i)(--(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization|[_-]?token)?|token|password|secret|credential|client[_-]?secret)(?:=\s*|\s+))"
-        r'("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|[^\s,;]+)',
+        r"""((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,;])+)""",
         r"\1[REDACTED]",
         msg,
     )
