@@ -1033,12 +1033,21 @@ def test_panel_settings_survive():
         from memory import config_manager
 
         writes = [0]
+        attempts = [0]
         real = config_manager.os.replace
+
+        def fail_once(src, dst, *a, **k):
+            if Path(dst) == config_manager.CONFIG_FILE and attempts[0] == 0:
+                attempts[0] += 1
+                raise PermissionError("simulated transient replacement failure")
+            if Path(dst) == config_manager.CONFIG_FILE:
+                attempts[0] += 1
+            return real(src, dst, *a, **k)
 
         def counted(src, dst, *a, **k):
             # Count the atomic replacement of the settings file. Its secure
             # temporary filename is intentionally randomized by mkstemp.
-            result = real(src, dst, *a, **k)
+            result = fail_once(src, dst, *a, **k)
             if Path(dst) == config_manager.CONFIG_FILE:
                 writes[0] += 1
             return result
@@ -1050,6 +1059,9 @@ def test_panel_settings_survive():
             config_manager.os.replace = real
 
         check("APPLY writes the config once", writes[0] == 1, str(writes[0]))
+        check("a failed replacement retry is not counted as successful",
+              attempts[0] == 2 and writes[0] == 1,
+              f"attempts={attempts[0]}, successful={writes[0]}")
         check("the mode was stored", get_provider_mode() == "pipeline",
               get_provider_mode())
         check("all three slots were stored",
