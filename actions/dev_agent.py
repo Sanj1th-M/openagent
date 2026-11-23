@@ -740,7 +740,7 @@ def _redact_credentials(msg: str) -> str:
     """Remove common credential formats before text reaches logs or callers."""
     msg = str(msg)
     msg = re.sub(
-        r"(?i)\b([a-z][a-z0-9+.-]*://)[^/@\s]+@",
+        r"(?i)\b([a-z][a-z0-9+.-]*://)[^/@?#\s]+@",
         r"\1[REDACTED]@",
         msg,
     )
@@ -748,13 +748,13 @@ def _redact_credentials(msg: str) -> str:
     msg = re.sub(r"(?i)\bBasic\s+[A-Za-z0-9+/]+={0,2}", "Basic [REDACTED]", msg)
     msg = re.sub(
         r"(?i)(--(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization|[_-]?token)?|token|password|secret|credential|client[_-]?secret)(?:=\s*|\s+))"
-        r"""((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,;])+)""",
+        r"""((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|(?:\\\r?\n|[^\s,;]))+)""",
         r"\1[REDACTED]",
         msg,
     )
     msg = re.sub(
         r"""(?i)((?:\\)?["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization|[_-]?token)|token|password|secret|credential|client[_-]?secret)(?:\\)?["']?)"""
-        r"""(\s*[:=]\s*)((?:\\?"(?:[^"\\]|\\.)*\\?"|\\?'(?:[^'\\]|\\.)*\\?'|[^\s,;])+)""",
+        r"""(\s*[:=]\s*)((?:\\?"(?:[^"\\]|\\.)*\\?"|\\?'(?:[^'\\]|\\.)*\\?'|(?:\\\r?\n|[^\s,;]))+)""",
         r"\1\2[REDACTED]", msg,
     )
     msg = re.sub(r"\bAIza[0-9A-Za-z_-]{20,}\b", "[REDACTED]", msg)

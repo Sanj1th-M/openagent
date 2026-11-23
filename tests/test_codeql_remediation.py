@@ -324,15 +324,19 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
         '{"password": "hunter2", "secret": "a value with spaces", '
         '"token": "plain_token_value", "authToken": "camel_token_value"} '
         'PASSWORD=prefix" secret tail" '
+        "PASSWORD=\\\ncontinuation_secret_42 command "
         '--password cli-password --api-key "cli key secret" ordinary-argument '
         '--password cli-prefix" cli mixed secret" '
+        "--password \\\ncli_continuation_secret_43 command "
         'escaped JSON: {\\"password\\": \\"escaped secret value\\"} '
         "postgresql://db-user:db-password@db.example.test/app "
         "postgresql://db.example.test/app "
+        "https://example.test?email=alice@example.org "
         "https://url-user:url-password@example.test/path",
     )
     output = capsys.readouterr().out
     assert "postgresql://db.example.test/app" in output + " ".join(player.logs)
+    assert "https://example.test?email=alice@example.org" in output + " ".join(player.logs)
     _assert_secrets_absent(
         [
             "sk-abcdefghijklmnopqrstuvwxyz",
@@ -344,9 +348,11 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
             "plain_token_value",
             "camel_token_value",
             "secret tail",
+            "continuation_secret_42",
             "cli-password",
             "cli key secret",
             "cli mixed secret",
+            "cli_continuation_secret_43",
             "escaped secret value",
             "db-user",
             "db-password",
