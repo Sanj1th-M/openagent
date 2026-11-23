@@ -1150,7 +1150,12 @@ class DashboardServer:
             if not _valid(tok):
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
             safe = re.sub(r'[/\\]', '', filename)
-            path = self._uploads_dir / safe
+            base = self._uploads_dir.resolve()
+            path = (base / safe).resolve()
+            try:
+                path.relative_to(base)
+            except ValueError:
+                return JSONResponse({"error": "Not found"}, status_code=404)
             if not path.exists() or not path.is_file():
                 return JSONResponse({"error": "Not found"}, status_code=404)
             return FileResponse(str(path), filename=safe)
