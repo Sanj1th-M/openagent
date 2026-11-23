@@ -412,7 +412,21 @@ def test_loading_config_fails_closed_when_permissions_cannot_be_restricted(
     monkeypatch.setattr(config_manager.os, "chmod", deny_chmod)
 
     assert config_manager.load_api_keys() == {}
+    with pytest.raises(config_manager.ConfigPermissionError):
+        config_manager.load_api_keys(raise_on_permission=True)
     assert "refusing to load settings" in capsys.readouterr().out
+
+
+def test_missing_config_is_still_reported_as_missing_not_permission(tmp_path, monkeypatch):
+    from memory import config_manager
+
+    config_dir = tmp_path / "config"
+    config_file = config_dir / "api_keys.json"
+    monkeypatch.setattr(config_manager, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(config_manager, "CONFIG_FILE", config_file)
+
+    assert config_manager.load_api_keys(raise_on_permission=True) == {}
+    assert config_manager.get_gemini_key(raise_on_permission=True) is None
 
 
 def test_provider_updates_abort_when_existing_settings_cannot_be_secured(tmp_path, monkeypatch):
@@ -455,7 +469,45 @@ def test_gemini_key_reader_does_not_bypass_config_permission_refusal(tmp_path, m
     monkeypatch.setattr(config_manager, "_restrict_existing_config_permissions", lambda: False)
 
     assert gemini.api_key() == ""
-    assert gemini._cached_key == ""
+    assert gemini._cached_key is None
+    assert gemini.api_key_error() == "permission"
+
+
+def test_gemini_key_reader_retries_after_permission_is_restored(tmp_path, monkeypatch):
+    from core import gemini
+    from memory import config_manager
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config_file = config_dir / "api_keys.json"
+    config_file.write_text(json.dumps({"gemini_api_key": "restored-key"}), encoding="utf-8")
+    monkeypatch.setattr(gemini, "_KEY_FILE", config_file)
+    monkeypatch.setattr(config_manager, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(config_manager, "CONFIG_FILE", config_file)
+    monkeypatch.setattr(gemini, "_cached_key", "stale-key")
+    restricted = iter((False, True))
+    monkeypatch.setattr(
+        config_manager, "_restrict_existing_config_permissions", lambda: next(restricted)
+    )
+
+    assert gemini.api_key() == ""
+    assert gemini.api_key() == "restored-key"
+    assert gemini.api_key_error() is None
+
+
+def test_gemini_status_reports_permission_refusal(monkeypatch):
+    from main import _gemini_status
+    from memory import config_manager
+
+    def refuse(**_kwargs):
+        raise config_manager.ConfigPermissionError("refused")
+
+    monkeypatch.setattr(config_manager, "load_api_keys", refuse)
+
+    assert _gemini_status() == (
+        False,
+        "SYS: Gemini settings cannot be read safely: permission denied.",
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX ownership and modes are not portable to Windows")

@@ -17,6 +17,10 @@ BASE_DIR    = get_base_dir()
 CONFIG_DIR  = BASE_DIR / "config"
 CONFIG_FILE = CONFIG_DIR / "api_keys.json"
 
+
+class ConfigPermissionError(PermissionError):
+    """The settings file exists but cannot be read safely."""
+
 def ensure_config_dir() -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if os.name != "nt":
@@ -145,10 +149,14 @@ def save_api_keys(gemini_api_key: str) -> None:
         data.pop("local_only", None)     # a key given is a choice to use Gemini again
     _write_config(data)
 
-def load_api_keys() -> dict:
+def load_api_keys(*, raise_on_permission: bool = False) -> dict:
     if not CONFIG_FILE.exists():
         return {}
     if not _restrict_existing_config_permissions():
+        if raise_on_permission:
+            raise ConfigPermissionError(
+                "Cannot safely read api_keys.json; settings permissions were refused."
+            )
         return {}
     for attempt in range(3):
         try:
@@ -163,8 +171,8 @@ def load_api_keys() -> dict:
             time.sleep(0.05)
     return {}
 
-def get_gemini_key() -> str | None:
-    return load_api_keys().get("gemini_api_key")
+def get_gemini_key(*, raise_on_permission: bool = False) -> str | None:
+    return load_api_keys(raise_on_permission=raise_on_permission).get("gemini_api_key")
 
 def is_configured() -> bool:
     key = get_gemini_key()

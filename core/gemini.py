@@ -246,6 +246,7 @@ MIN_TIMEOUT_MS = 10_000
 
 _key_lock = threading.Lock()
 _cached_key: str | None = None
+_last_key_error: str | None = None
 
 # A rung that answered 429 is out of quota, and on the free tier it will stay
 # that way for a while. Retrying it on every single call is a wasted round trip
@@ -377,19 +378,22 @@ def _cooling(model: str) -> bool:
 
 def api_key(refresh: bool = False) -> str:
     """The Gemini key from config/api_keys.json. Cached; never raises."""
-    global _cached_key
+    global _cached_key, _last_key_error
     with _key_lock:
+        _last_key_error = None
         if not _KEY_FILE.exists():
             _cached_key = ""
             return _cached_key
         try:
             from memory.config_manager import _restrict_existing_config_permissions
             if not _restrict_existing_config_permissions():
-                _cached_key = ""
-                return _cached_key
+                _cached_key = None
+                _last_key_error = "permission"
+                return ""
         except Exception:
-            _cached_key = ""
-            return _cached_key
+            _cached_key = None
+            _last_key_error = "permission"
+            return ""
         if _cached_key is not None and not refresh:
             return _cached_key
         try:
@@ -404,6 +408,12 @@ def api_key(refresh: bool = False) -> str:
                 _gone.clear()
         _cached_key = new_key
         return _cached_key
+
+
+def api_key_error() -> str | None:
+    """Return the last key-read failure category, if one occurred."""
+    with _key_lock:
+        return _last_key_error
 
 
 def client(timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = ""):

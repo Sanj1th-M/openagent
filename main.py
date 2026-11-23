@@ -344,18 +344,31 @@ def _render_prompt(template: str, values: dict) -> str:
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    from memory.config_manager import ConfigPermissionError, get_gemini_key
+
+    try:
+        return get_gemini_key(raise_on_permission=True) or ""
+    except ConfigPermissionError as e:
+        raise RuntimeError("Gemini settings permissions prevent safe access") from e
+
+
+def _gemini_status() -> tuple[bool, str | None]:
+    """Return Gemini availability and a user-facing configuration problem."""
+    from memory.config_manager import ConfigPermissionError, load_api_keys
+
+    try:
+        cfg = load_api_keys(raise_on_permission=True)
+    except ConfigPermissionError:
+        return False, "SYS: Gemini settings cannot be read safely: permission denied."
+    except Exception:
+        return False, None
+    usable = bool(str(cfg.get("gemini_api_key") or "").strip()) and not cfg.get("local_only")
+    return usable, None
 
 
 def _gemini_usable() -> bool:
     """A Gemini key is stored, and the user has not chosen to run without Gemini."""
-    try:
-        from memory.config_manager import load_api_keys
-        cfg = load_api_keys()
-    except Exception:
-        return False
-    return bool(str(cfg.get("gemini_api_key") or "").strip()) and not cfg.get("local_only")
+    return _gemini_status()[0]
 
 
 def _load_system_prompt() -> str:
@@ -2765,14 +2778,15 @@ class JarvisLive:
                 # install this returns None in a few microseconds and nothing
                 # below behaves any differently.
                 self._engine_caps = self._resolve_engine_caps()
-                if self._engine_caps is None and not _gemini_usable():
+                gemini_usable, gemini_problem = _gemini_status()
+                if self._engine_caps is None and not gemini_usable:
                     # Nothing can hold the conversation: Gemini has no key (or the
                     # user chose not to use it) and no local engine is set up.
                     # Connecting anyway failed with a bare KeyError every few
                     # seconds and told nobody anything.
                     if not getattr(self, "_no_engine_said", False):
                         self._no_engine_said = True
-                        self.ui.write_log(
+                        self.ui.write_log(gemini_problem or
                             "SYS: No Gemini key and no local engine set up yet — open ⚙ → "
                             "ENGINE & PROVIDERS and choose MY OWN SETUP, or add a Gemini key.")
                     self.ui.set_state("SLEEPING")
