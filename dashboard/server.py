@@ -1180,7 +1180,14 @@ class DashboardServer:
                     or safe.endswith((".", " "))):
                 return JSONResponse({"error": "Not found"}, status_code=404)
             root = self._uploads_dir.resolve()
-            path = (root / safe).resolve()
+            # Find an existing entry by name instead of putting request text
+            # into a filesystem path. This also gives CodeQL a clear
+            # source-to-sink boundary for the untrusted filename.
+            candidate = next((entry for entry in root.iterdir()
+                              if entry.name == safe), None)
+            if candidate is None:
+                return JSONResponse({"error": "Not found"}, status_code=404)
+            path = candidate.resolve()
             try:
                 path.relative_to(root)
             except ValueError:
