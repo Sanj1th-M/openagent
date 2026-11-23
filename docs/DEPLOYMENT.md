@@ -121,10 +121,10 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 python -m playwright install chromium firefox
 
-# Restore optional provider packages that you used before rollback.
-# These are intentionally not pinned in requirements.txt; use versions
-# recorded from the previous environment if exact reproducibility is needed.
-python -m pip install faster-whisper piper-tts
+# Restore optional provider packages only if you used them before rollback.
+# Run only the command for each provider you need (do not install packages you do not use):
+python -m pip install faster-whisper   # only if using local STT
+python -m pip install piper-tts       # only if using local TTS
 
 # Windows (PowerShell)
 # deactivate
@@ -133,9 +133,10 @@ python -m pip install faster-whisper piper-tts
 # .\.venv\Scripts\Activate.ps1
 # python -m pip install -r requirements.txt
 # python -m playwright install chromium firefox
-# python -m pip install faster-whisper piper-tts
+# python -m pip install faster-whisper   # only if using local STT
+# python -m pip install piper-tts       # only if using local TTS
 
-# The commands above restore the base dependencies and the listed optional
+# The commands above restore base dependencies and selected optional
 # provider packages from the checked-out tag; they do not restore every
 # optional package or exact versions from the previous environment.
 ```

@@ -34,7 +34,10 @@ _UPLOAD_OK = False
 try:
     # FastAPI's File symbols import without the multipart parser, but registering
     # a File(...) route then raises during app construction. Check the parser.
-    import multipart  # noqa: F401
+    try:
+        from python_multipart.multipart import parse_options_header  # noqa: F401
+    except ImportError:
+        from multipart.multipart import parse_options_header  # noqa: F401
     from fastapi import UploadFile, File as FastAPIFile
     _UPLOAD_OK = True
 except ImportError:
