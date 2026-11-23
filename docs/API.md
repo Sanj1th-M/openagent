@@ -9,15 +9,17 @@ This document provides technical documentation of the internal APIs, provider in
 All pluggable AI providers adhere to protocols and declarations in `providers/base.py`.
 
 ### Provider Declaration Schema
-Every provider module declares a `PROVIDER` metadata dictionary:
+Every provider module declares a `PROVIDER` metadata dictionary and an `available()` function:
 
 ```python
+from importlib.util import find_spec
+
 PROVIDER = {
     "id": "openai_compat",              # Unique, stable, stored in config
     "kind": "llm",                       # Options: "llm" | "stt" | "tts" | "engine"
     "label": "OpenAI-compatible",        # Display label for GUI settings
     "hint": "Ollama · LM Studio · Groq · DeepSeek · OpenRouter · vLLM",
-    "requires": ("httpx",),              # Checked via find_spec, not imported at boot
+    "requires": ("httpx",),              # Dependencies checked via find_spec
     "install": "httpx",                  # Package installed by one-click button
     "needs": (
         Field("base_url", "Base URL", default="http://localhost:11434/v1"),
@@ -27,6 +29,15 @@ PROVIDER = {
     "caps": {"tools": True, "tool_format": "openai", "max_tools": 12},
     "factory": _make,                    # Called once, lazily, on first use
 }
+
+def available() -> bool:
+    """True when this provider can be built.
+    
+    The registry does not inspect PROVIDER['requires'] automatically; it calls
+    available() (defaulting to True if omitted). Using find_spec verifies
+    dependencies without incurring heavy import latency or startup crashes.
+    """
+    return all(find_spec(pkg) is not None for pkg in PROVIDER["requires"])
 ```
 
 ### Core Provider Protocols

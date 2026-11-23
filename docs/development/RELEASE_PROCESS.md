@@ -11,7 +11,7 @@ openagent adheres to [Semantic Versioning (SemVer)](https://semver.org/):
 - **MINOR** version increments indicate new backwards-compatible features, actions, or providers.
 - **PATCH** version increments indicate backwards-compatible bug fixes and security patches.
 
-The canonical version is declared in `pyproject.toml` under `[project].version`.
+The canonical package version is declared in `pyproject.toml` under `[project].version` (using PEP 440 specification, e.g. `57.0` for Mark LVII). Release tags and changelogs align with this version (e.g. `v57.0` or `v57.0.0`).
 
 ---
 
@@ -55,17 +55,31 @@ Verify generated `.tar.gz` and `.whl` in `dist/`.
 ## 4. Tagging & Automated GitHub Release
 
 When all verification steps pass:
-1. Stage and commit the release preparation changes:
+
+1. **Commit Release Changes on Branch**:
    ```bash
    git add CHANGELOG.md pyproject.toml
    git commit -m "chore(release): prepare release vX.Y.Z"
    ```
-2. Create an annotated Git tag and push only the intended release tag:
+
+2. **Merge and Push to `main`**:
+   The release commit must be merged onto `main` and successfully pushed before creating or publishing any release tag. This prevents tags from triggering automated releases while `main` lacks the updated version and changelog:
+   ```bash
+   git checkout main
+   git merge --ff-only <release-branch>
+   git push origin main
+   ```
+   *Verify that `origin/main` contains the release commit before proceeding.*
+
+3. **Tag and Publish**:
+   Only after `main` has been successfully updated on the remote, create the annotated tag and push it:
    ```bash
    git tag -a vX.Y.Z -m "Release vX.Y.Z"
-   git push origin main vX.Y.Z
+   git push origin vX.Y.Z
    ```
-3. The `.github/workflows/release.yml` workflow triggers automatically on tag pushes matching `v*`:
+
+4. **Automated CI/CD**:
+   The `.github/workflows/release.yml` workflow triggers automatically on tag pushes matching `v*`:
    - Checks out the repository.
    - Sets up Python 3.12.
    - Builds distribution archives (`dist/*`).

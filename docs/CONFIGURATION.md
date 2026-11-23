@@ -33,25 +33,36 @@ A representative `config/api_keys.json` configuration file:
   "audio_input_device": null,
   "audio_output_device": null,
   "providers": {
-    "active_llm": "openai_compat",
-    "active_stt": "whisper",
-    "active_tts": "piper",
-    "openai_compat": {
-      "base_url": "http://localhost:11434/v1",
-      "api_key": "optional-key-for-local-server",
-      "model": "llama3"
+    "mode": "pipeline",
+    "pipeline": {
+      "llm": "openai_compat@ollama",
+      "stt": "whisper",
+      "tts": "piper"
     },
-    "elevenlabs": {
-      "api_key": "YOUR_ELEVENLABS_KEY",
-      "voice_id": "21m00Tcm4TlvDq8ikWAM"
-    }
+    "creds": {
+      "openai_compat@ollama": {
+        "catalog": "ollama",
+        "base_url": "http://localhost:11434/v1",
+        "api_key": "",
+        "model": "llama3.2:latest"
+      },
+      "whisper": {
+        "model_size": "base.en",
+        "device": "cpu"
+      },
+      "piper": {
+        "voice": "en_US-lessac-medium"
+      },
+      "elevenlabs": {
+        "api_key": "YOUR_ELEVENLABS_KEY",
+        "voice_id": "21m00Tcm4TlvDq8ikWAM"
+      }
+    },
+    "sidecar": "openai_compat@ollama",
+    "sidecar_first": false,
+    "coding": "openai_compat@ollama"
   },
-  "dashboard": {
-    "enabled": false,
-    "pairing_code": "A3K9M2P4",
-    "port": 8000,
-    "secure_port": 8001
-  },
+  "dashboard_https": false,
   "theme": "arc_reactor_cyan"
 }
 ```
@@ -73,17 +84,21 @@ A representative `config/api_keys.json` configuration file:
 - **`audio_input_device`** *(integer | null)*: Index or name of the microphone device enumerated by `sounddevice`. `null` selects the OS default.
 - **`audio_output_device`** *(integer | null)*: Index or name of the audio speaker device. `null` selects the OS default.
 
-### D. Provider Registry (`providers/`)
-openagent allows plug-and-play swapping of model providers via `providers/registry.py`:
-- **`active_llm`**: Selected LLM provider (`"openai_compat"` or catalog entries like `"openai_compat@groq"`).
-- **`active_stt`**: Selected Speech-to-Text provider (`"whisper"`).
-- **`active_tts`**: Selected Text-to-Speech provider (`"piper"`, `"system_tts"`, `"elevenlabs"`).
+### D. Provider Configuration (`memory/config_manager.py`)
+openagent supports modular local and third-party models alongside Gemini Live:
+- **`providers.mode`** *(string)*: Selects the active conversation engine: `"gemini"` (default: Live API) or `"pipeline"` (modular STT -> LLM -> TTS pipeline).
+- **`providers.pipeline`** *(object)*: Active provider selections for each pipeline slot:
+  - `llm`: Selected LLM provider (e.g. `"openai_compat@ollama"`, `"openai_compat@groq"`).
+  - `stt`: Speech-to-Text provider (e.g. `"whisper"`).
+  - `tts`: Text-to-Speech provider (e.g. `"piper"`, `"tts_system"`, `"tts_elevenlabs"`).
+- **`providers.creds`** *(object)*: Stored credentials, endpoints, models, and options keyed by provider identifier (e.g. `"openai_compat@ollama"`, `"whisper"`, `"piper"`).
+- **`providers.sidecar`** *(string)*: Provider ID used for one-shot background reasoning/tools when Gemini quota is exhausted.
+- **`providers.sidecar_first`** *(boolean)*: When `true`, routes background tool calls to the sidecar model before Gemini.
+- **`providers.coding`** *(string)*: Dedicated provider ID used by the autonomous coding agent (`actions/dev_agent.py`).
 
-### E. Remote Dashboard (`dashboard/`)
-- **`dashboard.enabled`** *(boolean)*: Enables the local FastAPI web server.
-- **`dashboard.port`** *(integer, default 8000)*: Plaintext HTTP port that automatically redirects to HTTPS.
-- **`dashboard.secure_port`** *(integer, default 8001)*: Secure HTTPS listener with auto-generated self-signed TLS certificates and AES-256-GCM payload encryption.
-- **`dashboard.pairing_code`** *(string)*: High-entropy pairing token used with PBKDF2 (200,000 iterations) to authenticate phone/remote sessions.
+### E. Remote Dashboard (`dashboard/server.py`)
+- **`dashboard_https`** *(boolean)*: When `true`, enables TLS on `SECURE_PORT` 8001 with auto-generated self-signed certificates and AES-256-GCM command payload encryption, while running an HTTP-to-HTTPS redirector on port 8000. When `false` (default) or if certificate generation fails, the dashboard serves plain HTTP on port 8000.
+- **Pairing Authentication**: An 8-character ephemeral pairing code is generated per session and strengthened with PBKDF2 (200,000 iterations). Authentication tokens expire automatically, and failed login attempts are rate-limited.
 
 ---
 

@@ -73,12 +73,24 @@ sequenceDiagram
 
 ### Headless or Remote Server Deployment (Dashboard Mode)
 If deploying on a local home server or headless desktop machine to serve the remote mobile dashboard:
+
+> [!IMPORTANT]
+> **Headless Initial Setup Prerequisite**: On a fresh installation, `main.py` checks `config/api_keys.json` for `os_system` and a valid engine configuration (`gemini_api_key`, `local_only: true`, or `providers.mode: "pipeline"`). If absent, `main.py` displays a graphical `SetupOverlay` and pauses startup at `ui.wait_for_api_key()`. In offscreen mode (`QT_QPA_PLATFORM=offscreen`), this overlay cannot be interacted with, which prevents `DashboardServer.serve()` from starting.
+>
+> To deploy in headless mode, you must satisfy the initial configuration prerequisite before launching offscreen:
+> 1. **Option A (Pre-configured JSON)**: Create or edit `config/api_keys.json` with `"os_system": "linux"` (or `"windows"` / `"darwin"`) and your engine preference (e.g. `"local_only": true` or `"gemini_api_key": "YOUR_KEY"`).
+> 2. **Option B (Desktop Setup First)**: Run `python main.py` once with an active display, complete the initial setup dialog, and shut down before migrating to the headless host.
+
+Once configured, run openagent in offscreen mode:
 ```bash
-# Run in offscreen mode
 export QT_QPA_PLATFORM=offscreen
 python main.py
 ```
-*Note: The dashboard requires initialization through `DashboardServer.serve()` to configure authentication, TLS certificates, and port redirection properly. Launching `python main.py` manages the dashboard server lifecycle.*
+
+#### Dashboard Protocol & TLS Behavior
+- **Default (Plain HTTP)**: When `"dashboard_https"` is unset or `false` in `config/api_keys.json`, `DashboardServer.serve()` starts on **plain HTTP on port 8000**. Network traffic is unencrypted (though authentication remains gated by the pairing code).
+- **Enabling HTTPS**: Set `"dashboard_https": true` in `config/api_keys.json` (and ensure `cryptography` is installed). The server automatically generates a self-signed TLS certificate in `config/certs/`, serves HTTPS on port 8001, and runs an HTTP-to-HTTPS redirector on port 8000. Clients must accept the self-signed certificate once per device.
+- **Certificate Fallback**: If certificate generation fails (e.g. `cryptography` is missing or directory creation fails), the server logs a warning and falls back to plain HTTP on port 8000 rather than aborting.
 
 ---
 
@@ -97,12 +109,20 @@ If a version introduces incompatibility on your workstation:
 ```bash
 git checkout <previous_stable_tag>
 
-# Recreate the virtual environment to restore the previous release's exact dependencies
+# Deactivate the active virtual environment before removal to prevent shell path lookup errors
 # macOS / Linux
-rm -rf .venv && python3 -m venv .venv && source .venv/bin/activate
-# Windows
-Remove-Item -Recurse -Force .venv; python -m venv .venv; .\.venv\Scripts\Activate.ps1
+deactivate 2>/dev/null || true
+rm -rf .venv
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Windows (PowerShell)
+# deactivate
+# Remove-Item -Recurse -Force .venv
+# python -m venv .venv
+# .\.venv\Scripts\Activate.ps1
 
 python setup.py
 ```
+Configuration files (`config/api_keys.json`) remain backward-compatible; if an incompatible setting exists, `memory/config_manager.py` ignores unmapped keys gracefully.
 Configuration files (`config/api_keys.json`) remain backward-compatible; if an incompatible setting exists, `memory/config_manager.py` ignores unmapped keys gracefully.
