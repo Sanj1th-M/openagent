@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import stat
+import threading
 import time
 
 import pytest
@@ -197,13 +198,35 @@ def test_dev_agent_log_redacts_common_credentials(capsys):
     assert "sk-abcdefghijklmnopqrstuvwxyz" not in output
     assert "Bearer abc.def.ghi" not in output
     assert "Bearer xyz.def.ghi" not in output
+    assert "xyz.def.ghi" not in output
     assert "hunter2" not in output
     assert "a value with spaces" not in output
     assert output.count("[REDACTED]") >= 5
 
 
-def test_dev_agent_credential_redaction_is_shared_with_job_results():
-    from actions.dev_agent import _redact_credentials
+def test_dev_agent_failed_job_results_are_redacted(tmp_path, monkeypatch):
+    from actions import dev_agent
 
-    result = _redact_credentials("Request failed for access_token: Bearer abc.def.ghi")
-    assert "abc.def.ghi" not in result
+    monkeypatch.setattr(dev_agent, "_job_lock", threading.Lock())
+    monkeypatch.setattr(dev_agent, "_JOB", {})
+    monkeypatch.setattr(dev_agent, "_player_ref", None)
+    dev_agent._new_job(tmp_path, "test-model", "test request", None)
+    assert dev_agent._job_lock.acquire(blocking=False)
+
+    completed = threading.Event()
+    spoken = []
+
+    def fail_job():
+        raise RuntimeError("access_token: Bearer xyz.def.ghi")
+
+    dev_agent._run_job(
+        fail_job,
+        tmp_path.name,
+        "test-model",
+        speak=lambda message: (spoken.append(message), completed.set()),
+    )
+
+    assert completed.wait(5), "background job did not finish"
+    result = dev_agent._job_snapshot()["result"]
+    assert "xyz.def.ghi" not in result
+    assert "xyz.def.ghi" not in spoken[0]
