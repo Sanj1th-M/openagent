@@ -324,9 +324,12 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
         '{"password": "hunter2", "secret": "a value with spaces", '
         '"token": "plain_token_value", "authToken": "camel_token_value"} '
         'PASSWORD=prefix" secret tail" '
+        "PASSWORD=prefix\\ assignment_escaped_suffix "
         "PASSWORD=\\\ncontinuation_secret_42 command "
+        'PASSWORD="quoted-prefix\\\nquoted_continuation_secret" '
         '--password cli-password --api-key "cli key secret" ordinary-argument '
         '--password cli-prefix" cli mixed secret" '
+        "--password cli-prefix\\ cli_escaped_suffix "
         "--password \\\ncli_continuation_secret_43 command "
         'escaped JSON: {\\"password\\": \\"escaped secret value\\"} '
         "postgresql://db-user:db-password@db.example.test/app "
@@ -348,10 +351,13 @@ def test_dev_agent_log_redacts_credentials_before_every_output(capsys, monkeypat
             "plain_token_value",
             "camel_token_value",
             "secret tail",
+            "assignment_escaped_suffix",
             "continuation_secret_42",
+            "quoted_continuation_secret",
             "cli-password",
             "cli key secret",
             "cli mixed secret",
+            "cli_escaped_suffix",
             "cli_continuation_secret_43",
             "escaped secret value",
             "db-user",
