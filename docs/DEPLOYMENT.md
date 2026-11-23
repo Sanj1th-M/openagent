@@ -79,7 +79,10 @@ If deploying on a local home server or headless desktop machine to serve the rem
 >
 > To deploy in headless mode, you must satisfy the initial configuration prerequisite before launching offscreen:
 > 1. **Option A (Pre-configured JSON)**: Create or edit `config/api_keys.json` with `"os_system": "linux"` (or `"windows"` / `"darwin"`) and your engine preference (e.g. `"local_only": true` or `"gemini_api_key": "YOUR_KEY"`).
-> 2. **Option B (Desktop Setup First)**: Run `python main.py` once with an active display, complete the initial setup dialog, and shut down before migrating to the headless host.
+> 2. **Option B (Desktop Setup First)**: Run `python main.py` once with an active display and complete the initial setup dialog before moving the configuration to the headless host. This satisfies the startup configuration check only; it does not create a persistent dashboard pairing PIN.
+
+> [!WARNING]
+> **Headless pairing is not currently supported.** A new pairing PIN is created in memory by `DashboardServer.new_key()` when the desktop Remote Control UI requests one. Pending PINs are not stored in `config/api_keys.json`, and the server exposes no headless CLI/API operation to create one. Therefore, a fully offscreen instance can start after it has been configured, but a new phone cannot be paired from that headless instance. Completing desktop setup and then restarting in offscreen mode does not carry a pairing PIN across the restart. Use the dashboard pairing flow from an accessible desktop UI; do not assume preconfiguring the JSON file enables headless pairing.
 
 Once configured, run openagent in offscreen mode:
 ```bash

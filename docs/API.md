@@ -145,44 +145,43 @@ Worker threads and plugins **must never create or modify Qt widgets directly**. 
 
 ## 3. Remote Dashboard API (`dashboard/server.py`)
 
-The local dashboard runs on `PORT 8000` (HTTP redirect) and `SECURE_PORT 8001` (HTTPS + TLS).
+The dashboard listens on port **8000** by default. When `dashboard_https` is set to `true` and certificate setup succeeds, it serves HTTPS on port **8001** and redirects HTTP requests from port 8000 to HTTPS. If HTTPS is disabled (the default) or certificate setup fails, it serves plain HTTP on port **8000**.
 
-### Security & Pairing Flow
-1. User pairs via QR code or by entering the 8-character pairing code.
-2. The pairing code is processed with PBKDF2 (200,000 rounds) to generate a symmetric session key.
-3. Payloads sent over WebSockets or HTTP are encrypted using AES-256-GCM.
+### Authentication and transport
 
-### Endpoints
+- The desktop **Remote Control** UI generates a short-lived pairing PIN. A fresh `DashboardServer` has no pending PIN until that UI action creates one.
+- `POST /login` exchanges the PIN for a bearer session token.
+- Authenticated HTTP endpoints require `Authorization: Bearer <session_token>`, except where an endpoint explicitly uses a device-token or query-token mechanism.
+- The browser derives an AES-256-GCM command key with PBKDF2 when Web Crypto is available. If key derivation or encryption is unavailable, the browser sends the command as a `text` field instead. HTTPS protects either request in transit only when the server is actually serving HTTPS. Plain HTTP does not provide TLS protection.
+- Dashboard responses sent with `send_json` rely on HTTPS transport when HTTPS is active; they are not wrapped in the command AES-GCM payload format.
 
-#### `GET /`
-- Returns: `login.html` (if unauthenticated) or `app.html` (if authenticated).
+### Pages and pairing
 
-#### `POST /auth/pair`
-- Authenticates a remote client with the pairing code.
-- **Request Body**: `{"code": "A3K9M2P4"}`
-- **Response**: `{"status": "ok", "token": "<session_token>"}`
+| Method | Path | Behavior |
+|---|---|---|
+| `GET` | `/` | Returns the dashboard application HTML. The page handles login state in the browser. |
+| `GET` | `/login` | Returns the login page. |
+| `POST` | `/login` | Accepts `{"pin": "A3K9M2P4"}`; a valid, unexpired PIN returns `{"ok": true, "token": "<session_token>"}`. Invalid or expired PINs return an authentication error. |
+| `GET` | `/auto-login?key=<pin>` | QR-code login flow using the same short-lived pending PIN. |
 
-#### `GET /api/status`
-- Returns assistant status, active model, and memory state.
-- **Authentication**: Bearer session token.
-- **Response**:
-  ```json
-  {
-    "status": "listening",
-    "assistant_name": "Jarvis",
-    "active_provider": "gemini",
-    "audio_level": 0.04
-  }
-  ```
+### API endpoints
 
-#### `POST /api/command`
-- Ingests a text instruction from the remote user.
-- **Request Body**: `{"command": "Search the web for local weather"}`
-- **Response**: `{"status": "dispatched"}`
+The following endpoints use the indicated authentication mechanism.
 
-#### `POST /api/upload`
-- Accepts file uploads up to 500MB, stored in `uploads/` or `Downloads/JARVIS Uploads`.
-- **Request Body**: `multipart/form-data` with file payload.
+| Method | Path | Authentication | Request | Success response / behavior |
+|---|---|---|---|---|
+| `POST` | `/api/command` | Bearer session token | JSON with `{"text": "…"}` or `{"enc": "<base64 AES-GCM payload>"}` | Queues the command and returns `{"ok": true}`. |
+| `POST` | `/api/wake` | Bearer session token | No body required | Wakes the assistant and returns `{"ok": true}`. |
+| `POST` | `/api/device-login` | Previously issued device token in JSON | `{"device_token": "…"}` | Reissues a session token and session key for a device token known to the running server. |
+| `POST` | `/api/revoke-devices` | Bearer session token | No body required | Revokes remembered device sessions and returns counts. |
+| `GET` | `/api/files` | Bearer session token | No body required | Returns the files currently in the dashboard upload directory. |
+| `POST` | `/api/upload` | Bearer session token | `multipart/form-data` with a `file` field | Stores an upload (maximum 500 MB) and returns `{"ok": true, "name": "…", "size": 123}`. Requires `python-multipart`; otherwise the endpoint returns HTTP 503. |
 
-#### `WebSocket /ws/stream`
-- Real-time bidirectional streaming for metrics, activity logs, and remote control events.
+### File download
+
+- `GET /uploads/{filename}?token=<session_token>` downloads a file from the upload directory. This route uses the `token` query parameter because a browser download link cannot attach a custom Authorization header.
+
+### WebSockets
+
+- `WebSocket /ws?token=<session_token>` is the registered dashboard event socket. The `token` query parameter must contain a valid session token; otherwise the server closes the connection.
+- `WebSocket /ws/phone-audio?token=<session_token>` is the authenticated phone-audio input socket.

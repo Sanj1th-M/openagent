@@ -47,7 +47,7 @@ A representative `config/api_keys.json` configuration file:
         "model": "llama3.2:latest"
       },
       "whisper": {
-        "model_size": "base.en",
+        "model": "base",
         "device": "cpu"
       },
       "piper": {
@@ -90,7 +90,7 @@ openagent supports modular local and third-party models alongside Gemini Live:
 - **`providers.pipeline`** *(object)*: Active provider selections for each pipeline slot:
   - `llm`: Selected LLM provider (e.g. `"openai_compat@ollama"`, `"openai_compat@groq"`).
   - `stt`: Speech-to-Text provider (e.g. `"whisper"`).
-  - `tts`: Text-to-Speech provider (e.g. `"piper"`, `"tts_system"`, `"tts_elevenlabs"`).
+  - `tts`: Text-to-Speech provider (e.g. `"piper"`, `"system_tts"`, `"elevenlabs"`).
 - **`providers.creds`** *(object)*: Stored credentials, endpoints, models, and options keyed by provider identifier (e.g. `"openai_compat@ollama"`, `"whisper"`, `"piper"`).
 - **`providers.sidecar`** *(string)*: Provider ID used for one-shot background reasoning/tools when Gemini quota is exhausted.
 - **`providers.sidecar_first`** *(boolean)*: When `true`, routes background tool calls to the sidecar model before Gemini.

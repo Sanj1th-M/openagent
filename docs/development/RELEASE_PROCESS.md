@@ -6,12 +6,9 @@ This document defines the release lifecycle, versioning strategy, and publishing
 
 ## 1. Versioning Strategy
 
-openagent adheres to [Semantic Versioning (SemVer)](https://semver.org/):
-- **MAJOR** version increments indicate breaking architectural changes or major platform upgrades (e.g. `v57.0.0`).
-- **MINOR** version increments indicate new backwards-compatible features, actions, or providers.
-- **PATCH** version increments indicate backwards-compatible bug fixes and security patches.
+The package version declared in `pyproject.toml` under `[project].version` follows [PEP 440](https://peps.python.org/pep-0440/). The current canonical version is `57.0`. This two-component release number is valid under PEP 440; it is not a three-component Semantic Versioning (SemVer) number.
 
-The canonical package version is declared in `pyproject.toml` under `[project].version` (using PEP 440 specification, e.g. `57.0` for Mark LVII). Release tags and changelogs align with this version (e.g. `v57.0` or `v57.0.0`).
+Keep the numeric version consistent across `pyproject.toml`, the matching `CHANGELOG.md` heading, and the release tag. For the current version, the corresponding tag is `v57.0`. Do not describe the project's current version scheme as SemVer or silently change `57.0` to `57.0.0` in only one of those locations.
 
 ---
 
@@ -59,7 +56,7 @@ When all verification steps pass:
 1. **Commit Release Changes on Branch**:
    ```bash
    git add CHANGELOG.md pyproject.toml
-   git commit -m "chore(release): prepare release vX.Y.Z"
+   git commit -m "chore(release): prepare release v57.0"
    ```
 
 2. **Merge and Push to `main`**:
@@ -74,13 +71,13 @@ When all verification steps pass:
 3. **Tag and Publish**:
    Only after `main` has been successfully updated on the remote, create the annotated tag and push it:
    ```bash
-   git tag -a vX.Y.Z -m "Release vX.Y.Z"
-   git push origin vX.Y.Z
+   git tag -a v57.0 -m "Release v57.0"
+   git push origin v57.0
    ```
 
 4. **Automated CI/CD**:
    The `.github/workflows/release.yml` workflow triggers automatically on tag pushes matching `v*`:
-   - Checks out the repository.
+   - Checks out the repository at the pushed release tag.
    - Sets up Python 3.12.
    - Builds distribution archives (`dist/*`).
    - Generates release notes and publishes the GitHub Release via `softprops/action-gh-release`.

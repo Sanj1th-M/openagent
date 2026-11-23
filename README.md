@@ -5,7 +5,7 @@
 [![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](pyproject.toml)
 [![License: Personal & Non-Commercial](https://img.shields.io/badge/license-personal%20use%20only-lightgrey.svg)](#-attribution)
 
-> **openagent** is an open-source, local-first multimodal personal AI assistant and autonomous desktop agent. It combines bidirectional real-time voice streaming, a software-rendered 3D holographic avatar, autonomous background task execution, verifiable desktop automation, and an encrypted remote control dashboard.
+> **openagent** is an open-source, local-first multimodal personal AI assistant and autonomous desktop agent. It combines bidirectional real-time voice streaming, a software-rendered 3D holographic avatar, autonomous background task execution, verifiable desktop automation, and a remote-control dashboard with optional HTTPS and command-payload encryption when available.
 
 ---
 
@@ -52,7 +52,7 @@ openagent operates on your terms with full cross-platform support across Windows
 | 🔇 **Adaptive Anti-Self-Echo** | Continuous output-buffer subtraction preventing the assistant from triggering on its own spoken audio. |
 | 🎚️ **Push-to-Talk & Wake Word** | Optional local offline wake-word detector ("Hey Jarvis") and customizable push-to-talk hotkey (`Ctrl+Space`). |
 | 🖥️ **Desktop Automation Suite** | Verified application management, browser interaction, document reading, media playback, and hardware telemetry. |
-| 📱 **Encrypted Mobile Dashboard** | Mobile/browser remote control authenticated via PBKDF2 (200k rounds) with TLS and AES-256-GCM encrypted transport. |
+| 📱 **Remote Mobile Dashboard** | Mobile/browser remote control uses pairing-code authentication with PBKDF2; HTTPS is opt-in, and AES-256-GCM command encryption is used when browser key derivation succeeds. |
 | ↩️ **Deterministic System Undo** | Reversible action journaling for file operations, desktop organization, and computer settings. |
 
 ---
@@ -198,10 +198,29 @@ Key settings can be updated at any time via the GUI settings drawer (⚙) or edi
   "audio_input_device": null,
   "audio_output_device": null,
   "providers": {
-    "active_llm": "gemini",
-    "active_stt": "whisper_local",
-    "active_tts": "system"
-  }
+    "mode": "pipeline",
+    "pipeline": {
+      "llm": "openai_compat@ollama",
+      "stt": "whisper",
+      "tts": "piper"
+    },
+    "creds": {
+      "openai_compat@ollama": {
+        "catalog": "ollama",
+        "base_url": "http://localhost:11434/v1",
+        "api_key": "",
+        "model": "llama3.2:latest"
+      },
+      "whisper": {
+        "model": "base",
+        "device": "cpu"
+      },
+      "piper": {
+        "voice": "en_US-lessac-medium"
+      }
+    }
+  },
+  "dashboard_https": false
 }
 ```
 
@@ -263,7 +282,7 @@ Review the [Contributing Guidelines](CONTRIBUTING.md) and [Coding Standards](doc
 openagent is architected with strict local-first data privacy:
 - **No Telemetry**: Zero external tracking, accounts, or proprietary analytics servers.
 - **Local Storage**: Credentials, conversation memory (`memory/long_term.json`), and task checkpoints stay exclusively on your filesystem.
-- **Encrypted Remote Access**: Mobile dashboard communication uses TLS and AES-256-GCM payload encryption with PBKDF2 key derivation.
+- **Remote Dashboard Security**: Pairing uses PBKDF2-derived session material. HTTPS is opt-in; AES-256-GCM protects command payloads only when browser key derivation succeeds. Without active HTTPS, network traffic is not protected by TLS.
 - **Prompt Injection Defense**: External web data is isolated using `<<<UNTRUSTED ...>>>` fences.
 - **Process Protection**: The assistant detects and shields its own process tree from self-termination commands.
 
