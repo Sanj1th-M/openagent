@@ -729,18 +729,24 @@ def _update(status: str | None = None, file: str | None = None,
     _publish()
 
 
-def _log(player, msg: str) -> None:
-    # Task logs can include model errors or user supplied instructions. Keep
-    # common credential forms out of the console, activity panel and snapshots.
+def _redact_credentials(msg: str) -> str:
+    """Remove common credential formats before text reaches logs or callers."""
     msg = str(msg)
+    msg = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", msg)
     msg = re.sub(
         r"""(?i)(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|credential)["']?)"""
         r"""(\s*[:=]\s*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,;]+)""",
         r"\1\2[REDACTED]", msg,
     )
-    msg = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", msg)
     msg = re.sub(r"\bAIza[0-9A-Za-z_-]{20,}\b", "[REDACTED]", msg)
     msg = re.sub(r"\bsk-[A-Za-z0-9_-]{16,}\b", "[REDACTED]", msg)
+    return msg
+
+
+def _log(player, msg: str) -> None:
+    # Task logs can include model errors or user supplied instructions. Keep
+    # common credential forms out of the console, activity panel and snapshots.
+    msg = _redact_credentials(msg)
     try:
         print(f"[DevAgent] {msg}")
     except UnicodeEncodeError:       # a console on a legacy code page
@@ -1565,9 +1571,12 @@ def _run_job(job, name: str, who: str, speak=None, player=None) -> str:
                 status = "finished with problems"
         except Exception as e:
             status = "failed"
-            result = f"The coding job on '{name}' failed: {type(e).__name__}: {str(e)[:200]}"
+            result = _redact_credentials(
+                f"The coding job on '{name}' failed: {type(e).__name__}: {e}"
+            )[:200]
             _log(player, result)
         finally:
+            result = _redact_credentials(result)
             _job_lock.release()
         _update(status, result=result, finished=time.time())
         if speak:

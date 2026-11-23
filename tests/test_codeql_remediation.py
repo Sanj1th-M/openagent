@@ -190,11 +190,20 @@ def test_dev_agent_log_redacts_common_credentials(capsys):
     _log(
         None,
         "api_key=sk-abcdefghijklmnopqrstuvwxyz Bearer abc.def.ghi "
+        "access_token: Bearer xyz.def.ghi "
         '{"password": "hunter2", "secret": "a value with spaces"}',
     )
     output = capsys.readouterr().out
     assert "sk-abcdefghijklmnopqrstuvwxyz" not in output
     assert "Bearer abc.def.ghi" not in output
+    assert "Bearer xyz.def.ghi" not in output
     assert "hunter2" not in output
     assert "a value with spaces" not in output
-    assert output.count("[REDACTED]") >= 4
+    assert output.count("[REDACTED]") >= 5
+
+
+def test_dev_agent_credential_redaction_is_shared_with_job_results():
+    from actions.dev_agent import _redact_credentials
+
+    result = _redact_credentials("Request failed for access_token: Bearer abc.def.ghi")
+    assert "abc.def.ghi" not in result
