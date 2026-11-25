@@ -91,10 +91,19 @@ def save_api_keys(gemini_api_key: str) -> None:
     ensure_config_dir()
 
     data = _read_for_write()
+    key = gemini_api_key.strip()
+    if key:
+        from memory.credential_store import save_gemini_key
 
-    data["gemini_api_key"] = gemini_api_key.strip()
-    if data["gemini_api_key"]:
+        save_gemini_key(key)
+        # Remove the legacy copy only after the vault write succeeds.
+        data.pop("gemini_api_key", None)
         data.pop("local_only", None)     # a key given is a choice to use Gemini again
+    else:
+        from memory.credential_store import delete_gemini_key
+
+        delete_gemini_key()
+        data.pop("gemini_api_key", None)
     _write_config(data)
 
 def load_api_keys() -> dict:
@@ -114,7 +123,29 @@ def load_api_keys() -> dict:
     return {}
 
 def get_gemini_key() -> str | None:
-    return load_api_keys().get("gemini_api_key")
+    from memory.credential_store import CredentialStoreUnavailable, get_gemini_key as vault_key
+
+    try:
+        stored = vault_key()
+    except CredentialStoreUnavailable:
+        # Existing installations remain usable until an explicit successful
+        # migration. New writes never fall back to this legacy plaintext value.
+        return load_api_keys().get("gemini_api_key")
+    if stored:
+        return stored
+    legacy = str(load_api_keys().get("gemini_api_key") or "").strip()
+    if not legacy:
+        return None
+    try:
+        from memory.credential_store import save_gemini_key
+
+        save_gemini_key(legacy)
+        data = _read_for_write()
+        data.pop("gemini_api_key", None)
+        _write_config(data)
+        return legacy
+    except CredentialStoreUnavailable:
+        return legacy
 
 def is_configured() -> bool:
     key = get_gemini_key()

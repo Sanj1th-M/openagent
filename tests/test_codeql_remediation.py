@@ -1,6 +1,9 @@
 """Focused regression coverage for CodeQL remediation work."""
 
+from typing import Any
+
 from dashboard.server import _dashboard_bind_host, _https_redirect_target, _script_json
+from memory import config_manager
 from providers.llm_openai import _normalise, _uses_host
 
 
@@ -34,3 +37,14 @@ def test_https_redirect_keeps_destination_authority_local() -> None:
 
     target = _https_redirect_target(URL("http://attacker.test/path?next=//evil.test"), "192.0.2.1")
     assert target == "https://192.0.2.1:8001/path?next=//evil.test"
+
+
+def test_new_gemini_keys_are_not_written_to_configuration(monkeypatch) -> None:
+    written: list[dict[str, Any]] = []
+    monkeypatch.setattr(config_manager, "_read_for_write", lambda: {"gemini_api_key": "old"})
+    monkeypatch.setattr(config_manager, "_write_config", written.append)
+    monkeypatch.setattr("memory.credential_store.save_gemini_key", lambda value: None)
+
+    config_manager.save_api_keys("new-secret")
+
+    assert written == [{}]
