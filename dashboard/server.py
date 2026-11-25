@@ -1156,8 +1156,25 @@ class DashboardServer:
                 or not re.fullmatch(r"[A-Za-z0-9._ -]+", safe)
             ):
                 return JSONResponse({"error": "Not found"}, status_code=404)
-            base = self._uploads_dir.resolve()
-            path = (base / safe).resolve()
+            try:
+                base = self._uploads_dir.resolve()
+            except (OSError, RuntimeError):
+                return JSONResponse({"error": "Not found"}, status_code=404)
+            # Select only an existing upload entry; request text never builds
+            # the path handed to FileResponse.
+            try:
+                candidate = next((entry for entry in base.iterdir() if entry.name == safe), None)
+            except OSError:
+                candidate = None
+            if candidate is None:
+                return JSONResponse({"error": "Not found"}, status_code=404)
+            # Uploads are regular files; never follow a filesystem link.
+            if candidate.is_symlink():
+                return JSONResponse({"error": "Not found"}, status_code=404)
+            try:
+                path = candidate.resolve()
+            except (OSError, RuntimeError):
+                return JSONResponse({"error": "Not found"}, status_code=404)
             try:
                 path.relative_to(base)
             except ValueError:
