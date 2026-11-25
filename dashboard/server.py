@@ -12,6 +12,7 @@ Install deps:  pip install fastapi "uvicorn[standard]" cryptography
 import asyncio
 import base64
 import hashlib
+import json
 import re
 import secrets
 import socket
@@ -59,6 +60,34 @@ STATIC_DIR  = Path(__file__).parent / "static"
 PORT        = 8000      # HTTP, redirects to SECURE_PORT
 SECURE_PORT = 8001      # HTTPS, the dashboard itself
 MAX_UPLOAD_MB = 500
+
+
+def _script_json(value: str) -> str:
+    """Serialize a string for an inline script without allowing HTML breakout."""
+    return (
+        json.dumps(value)
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+
+
+def _dashboard_bind_host() -> str:
+    """Loopback by default; LAN exposure is an explicit persisted choice."""
+    try:
+        with open(BASE_DIR / "config" / "api_keys.json", encoding="utf-8") as stream:
+            configured = json.load(stream).get("dashboard_bind_host", "127.0.0.1")
+    except (OSError, ValueError, AttributeError):
+        configured = "127.0.0.1"
+    host = str(configured).strip()
+    return host if host in {"127.0.0.1", "::1", "0.0.0.0"} else "127.0.0.1"
+
+
+def _https_redirect_target(request_url, local_ip: str) -> str:
+    """Preserve path/query while pinning the redirect authority locally."""
+    return str(request_url.replace(scheme="https", netloc=f"{local_ip}:{SECURE_PORT}"))
 
 
 def _make_uploads_dir() -> Path:
@@ -726,6 +755,7 @@ class DashboardServer:
 
     def __init__(self):
         self._ip                          = _local_ip()
+        self._bind_host                   = _dashboard_bind_host()
         # token -> issued-at. A set had no way to expire anything; this does,
         # and `_auth` sweeps as it reads so nothing has to run a timer.
         self._tokens: dict[str, float]    = {}
@@ -799,8 +829,11 @@ class DashboardServer:
         """The full URL the QR code carries — always with its scheme, so a
         scanner never has to guess."""
         if self._ssl_enabled():
-            return f"https://{self._ip}:{SECURE_PORT}"
-        return f"http://{self._ip}:{PORT}"
+            return f"https://{self._public_host()}:{SECURE_PORT}"
+        return f"http://{self._public_host()}:{PORT}"
+
+    def _public_host(self) -> str:
+        return self._ip if self._bind_host == "0.0.0.0" else self._bind_host
 
     def get_manual_url(self) -> str:
         """What to type into a phone browser by hand.
@@ -963,9 +996,9 @@ class DashboardServer:
 </style></head>
 <body>
 <script>
-  sessionStorage.setItem('jarvis_token','{tok}');
-  sessionStorage.setItem('jarvis_key','{key}');
-  localStorage.setItem('jarvis_device_token','{dev_tok}');
+  sessionStorage.setItem('jarvis_token',{_script_json(tok)});
+  sessionStorage.setItem('jarvis_key',{_script_json(key)});
+  localStorage.setItem('jarvis_device_token',{_script_json(dev_tok)});
   setTimeout(function(){{location.replace('/')}},400);
 </script>
 <p>Connecting to JARVIS…</p>
@@ -1116,7 +1149,8 @@ class DashboardServer:
                         dest.unlink(missing_ok=True)
                     except Exception:
                         pass
-                    return JSONResponse({"error": str(exc)}, status_code=500)
+                    print(f"[Dashboard] Upload failed ({type(exc).__name__})")
+                    return JSONResponse({"error": "Upload failed"}, status_code=500)
 
                 asyncio.create_task(self.broadcast({
                     "type": "file_received",
@@ -1245,13 +1279,13 @@ class DashboardServer:
         bounce = FastAPI(docs_url=None, redoc_url=None)
 
         @bounce.get("/{path:path}")
-        async def _to_https(path: str, request: Request):
-            query = f"?{request.url.query}" if request.url.query else ""
+        async def _to_https(request: Request):
+            target = _https_redirect_target(request.url, self._public_host())
             return RedirectResponse(
-                f"https://{self._ip}:{SECURE_PORT}/{path}{query}",
+                target,
                 status_code=307)
 
-        cfg = uvicorn.Config(bounce, host="0.0.0.0", port=PORT,
+        cfg = uvicorn.Config(bounce, host=self._bind_host, port=PORT,
                              log_level="warning")
         print(f"[Dashboard] Type by hand:  {self._ip}:{PORT}  "
               f"(sends you to the secure page)")
@@ -1307,7 +1341,7 @@ class DashboardServer:
                   'certificate once).')
 
         cfg = uvicorn.Config(
-            self.app, host="0.0.0.0",
+            self.app, host=self._bind_host,
             port=SECURE_PORT if use_ssl else PORT, log_level="warning",
             **({"ssl_keyfile": str(ssl_key), "ssl_certfile": str(ssl_cert)}
                if use_ssl else {}),
@@ -1329,7 +1363,7 @@ class DashboardServer:
         # being tested for, so setting it made the probe always succeed.
         _probe = _socket.socket()
         try:
-            _probe.bind(("0.0.0.0", SECURE_PORT if use_ssl else PORT))
+            _probe.bind((self._bind_host, SECURE_PORT if use_ssl else PORT))
         except OSError as exc:
             _probe.close()
             self._bind_error = (

@@ -29,11 +29,12 @@ WHAT IS DELIBERATELY NOT HERE
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import time
-import contextlib
 from importlib.util import find_spec
 from typing import Any, AsyncIterator, Optional
+from urllib.parse import urlsplit
 
 from .base import DEFAULT_CAPS, Field, FunctionCall
 
@@ -184,17 +185,51 @@ def _normalise(url: str) -> str:
         return ""
     if "://" not in url:
         url = "http://" + url
-    scheme, _, rest = url.partition("://")
-    host, slash, path = rest.partition("/")
-    if host.split(":")[0].lower() == "localhost":
-        port = host.partition(":")[2]
-        host = "127.0.0.1" + (f":{port}" if port else "")
-    url = f"{scheme}://{host}{slash}{path}".rstrip("/")
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return ""
+    if (
+        parsed.scheme.lower() not in ("http", "https")
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        return ""
+    host = parsed.netloc
+    if hostname.lower() == "localhost":
+        host = "127.0.0.1" + (f":{port}" if port is not None else "")
+    path = parsed.path
+    url = f"{parsed.scheme.lower()}://{host}{path}".rstrip("/")
     # Only append /v1 when there is no path at all. An endpoint served under a
     # prefix (a reverse proxy, OpenRouter's /api/v1) must be left alone.
     if not path:
         url += "/v1"
     return url
+
+
+def _uses_host(url: str, hostname: str) -> bool:
+    """Match a provider by parsed hostname, never by a URL substring."""
+    try:
+        return urlsplit(url).hostname == hostname
+    except ValueError:
+        return False
+
+
+def _uses_https(url: str) -> bool:
+    """Return whether a normalized endpoint protects credentials in transit."""
+    try:
+        return urlsplit(url).scheme.lower() == "https"
+    except ValueError:
+        return False
+
+
+def _uses_https_host(url: str, hostname: str) -> bool:
+    return _uses_https(url) and _uses_host(url, hostname)
 
 
 def _int_or(value, default):
@@ -360,7 +395,7 @@ class OpenAICompatLLM:
         self.base = _normalise(cfg.get("base_url") or "")
         self.model = (cfg.get("model") or "").strip()
         self.key = (cfg.get("api_key") or "").strip()
-        if not self.key and "generativelanguage.googleapis.com" in self.base:
+        if not self.key and _uses_https_host(self.base, "generativelanguage.googleapis.com"):
             # The Gemini entry needs no second key: the one Gemini Live already
             # uses is the natural choice, and a different key pasted here is how
             # a free-tier project ends up behind a paid one (20 requests a day).
@@ -417,7 +452,7 @@ class OpenAICompatLLM:
     # -- headers ------------------------------------------------------------
     def _headers(self) -> dict:
         h = {"Content-Type": "application/json"}
-        if self.key:
+        if self.key and _uses_https(self.base):
             h["Authorization"] = f"Bearer {self.key}"
         return h
 
@@ -430,13 +465,13 @@ class OpenAICompatLLM:
             body["tool_choice"] = "auto"
         if temperature is not None:
             body["temperature"] = temperature
-        if "generativelanguage.googleapis.com" in self.base and "flash" in self.model:
+        if _uses_host(self.base, "generativelanguage.googleapis.com") and "flash" in self.model:
             # Gemini 3 Flash models think before every answer unless told not
             # to, which is most of their wait in a spoken turn. Measured
             # 2026-11-04: 3.5-flash first word ~2.4 s -> ~1.6 s at "low";
             # the Lite models answer as well with no thinking at all.
             body["reasoning_effort"] = "none" if "lite" in self.model else "low"
-        if "minimax" in self.base:
+        if _uses_host(self.base, "api.minimax.io"):
             # MiniMax's M2 models put their thinking inline as <think>…</think>
             # unless asked not to. The pipeline filters that out of speech, but
             # `complete()` feeds background requests that have no such filter —
@@ -452,11 +487,12 @@ class OpenAICompatLLM:
         error, classify it and rest this rung exactly as it rests a Gemini one."""
         try:
             with self._httpx.Client(timeout=timeout or self.timeout,
-                                    trust_env=self._trust_env) as cl:
+                                    trust_env=self._trust_env,
+                                    follow_redirects=False) as cl:
                 r = cl.post(f"{self.base}/chat/completions",
                             headers=self._headers(),
                             json=self._body(messages, tools, False, temperature))
-                if r.status_code >= 400:
+                if not 200 <= r.status_code < 300:
                     raise RuntimeError(f"{r.status_code} {_terse(r.text)}")
                 data = r.json()
         except Exception as e:
@@ -485,11 +521,12 @@ class OpenAICompatLLM:
         # see providers/engine_pipeline._report. `complete()` IS wrapped, because
         # its caller is core/gemini.py's ladder, which has no such context.
         async with self._httpx.AsyncClient(timeout=self.timeout,
-                                           trust_env=self._trust_env) as cl:
+                                           trust_env=self._trust_env,
+                                           follow_redirects=False) as cl:
             if not stream:
                 r = await cl.post(f"{self.base}/chat/completions",
                                   headers=self._headers(), json=body)
-                if r.status_code >= 400:
+                if not 200 <= r.status_code < 300:
                     raise RuntimeError(f"{r.status_code} {_terse(r.text)}")
                 msg = ((r.json().get("choices") or [{}])[0].get("message") or {})
                 if msg.get("content"):
@@ -541,7 +578,7 @@ class OpenAICompatLLM:
     async def _open_stream(self, cl, body: dict):
         """POST the streaming request; on Gemini, step past a model that is
         out of quota or overloaded before anything has been said."""
-        gemini = "generativelanguage.googleapis.com" in self.base
+        gemini = _uses_host(self.base, "generativelanguage.googleapis.com")
         models = self._gemini_order() if gemini else [body.get("model")]
         last = ""
         for model in models:
@@ -550,7 +587,7 @@ class OpenAICompatLLM:
                 req["reasoning_effort"] = "none" if "lite" in model else "low"
             async with cl.stream("POST", f"{self.base}/chat/completions",
                                  headers=self._headers(), json=req) as r:
-                if r.status_code < 400:
+                if 200 <= r.status_code < 300:
                     yield r
                     return
                 last = f"{r.status_code} {_terse((await r.aread()).decode('utf-8', 'replace'))}"
@@ -565,9 +602,11 @@ class OpenAICompatLLM:
         """What this endpoint offers, so the panel can present a list instead of
         asking someone to type a model name exactly right."""
         with self._httpx.Client(timeout=timeout,
-                                trust_env=self._trust_env) as cl:
+                                trust_env=self._trust_env,
+                                follow_redirects=False) as cl:
             r = cl.get(f"{self.base}/models", headers=self._headers())
-            r.raise_for_status()
+            if not 200 <= r.status_code < 300:
+                raise RuntimeError(f"{r.status_code} {_terse(r.text)}")
             data = r.json()
         rows = data.get("data") if isinstance(data, dict) else data
         return sorted({str(m.get("id")) for m in (rows or []) if m.get("id")})
@@ -647,6 +686,8 @@ class OpenAICompatLLM:
         """
         if not self.base:
             return False, "No address set."
+        if self.key and not _uses_https(self.base):
+            return False, "Provider API keys are sent only to HTTPS addresses."
         if not self.model:
             return False, "No model chosen."
         import time

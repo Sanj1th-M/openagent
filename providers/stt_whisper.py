@@ -204,19 +204,23 @@ class WhisperSTT:
     # ── hosted ───────────────────────────────────────────────────────────────
     def _api_blocking(self, pcm: bytes, sample_rate: int) -> str:
         import httpx
-        from .llm_openai import _normalise, _is_loopback, _terse
+        from .llm_openai import _normalise, _is_loopback, _terse, _uses_https
 
         base = _normalise(self.base_url)
+        if not base:
+            raise ValueError("Invalid transcription API address")
         wav = audio.to_wav(pcm, rate=sample_rate)
-        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        headers = ({"Authorization": f"Bearer {self.api_key}"}
+                   if self.api_key and _uses_https(base) else {})
         data = {"model": self.model_name, "response_format": "json"}
         if self.language:
             data["language"] = self.language
-        with httpx.Client(timeout=60.0, trust_env=not _is_loopback(base)) as cl:
+        with httpx.Client(timeout=60.0, trust_env=not _is_loopback(base),
+                          follow_redirects=False) as cl:
             r = cl.post(f"{base}/audio/transcriptions", headers=headers,
                         data=data,
                         files={"file": ("speech.wav", wav, "audio/wav")})
-            if r.status_code >= 400:
+            if not 200 <= r.status_code < 300:
                 raise RuntimeError(f"{r.status_code} {_terse(r.text)}")
             payload = r.json()
         # The hosted endpoint reports no confidence, so a language it names is
@@ -285,8 +289,15 @@ class WhisperSTT:
 
     def probe(self) -> tuple[bool, str]:
         if self.backend == "api":
+            from .llm_openai import _normalise, _uses_https
+
             if not self.base_url:
                 return False, "No address set."
+            base = _normalise(self.base_url)
+            if not base:
+                return False, "The address must use HTTP or HTTPS."
+            if self.api_key and not _uses_https(base):
+                return False, "Whisper API keys are sent only to HTTPS addresses."
             return True, "Will be checked on first use."
         if find_spec("faster_whisper") is None:
             return False, "faster-whisper is not installed."
