@@ -117,6 +117,10 @@ fit the allowed character set, and valid downloads keep the same URL and
 response type.  The change intentionally continues returning `404` for an
 invalid or absent filename to avoid revealing filesystem details.
 
+The CI test job installs FastAPI explicitly so these route-level regression
+tests run in every matrix environment; the project already declares FastAPI in
+`requirements.txt`.
+
 ## Follow-up hardening decision
 
 ### Confirmed issue
