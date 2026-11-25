@@ -174,20 +174,28 @@ def _say(text: str) -> None:
 
 
 def _write_operator_output(text: str) -> None:
-    """Write explicit operator-requested CLI output directly to the terminal stdout."""
+    """Show sensitive pairing material only on an interactive operator terminal.
+
+    Never send pairing codes to redirected stdout, service logs, CI logs, or
+    captured subprocess output. These writes are the deliberate, user-requested
+    terminal display path for the pairing code.
+    """
     stream = sys.__stdout__
-    if stream is None:
+    if stream is None or not stream.isatty():
         return
     out = str(text)
     if not out.endswith("\n"):
         out += "\n"
     try:
+        # codeql[py/clear-text-logging-sensitive-data] Explicit interactive
+        # terminal display, not a log sink; non-TTY streams return above.
         stream.write(out)
         stream.flush()
     except UnicodeEncodeError:
+        # codeql[py/clear-text-logging-sensitive-data] Guarded terminal-only
+        # display with an ASCII fallback for limited terminal encodings.
         stream.write(out.encode("ascii", "replace").decode())
         stream.flush()
-
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  THE LINK — used by both sides
