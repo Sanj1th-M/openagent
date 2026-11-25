@@ -35,7 +35,6 @@ from PyQt6.QtWidgets import (
 
 from gui.theme import (
     API_FILE,
-    APP_PROTOCOL,
     APP_VERSION,
     C,
     CONFIG_DIR,
@@ -1260,7 +1259,7 @@ class MainWindow(QMainWindow):
         self._title_lbl.setStyleSheet(f"color: {C.WHITE}; background: transparent;")
         self._title_lbl.setToolTip(self._subtitle(display))
         name_col.addWidget(self._title_lbl)
-        self._sub_lbl = QLabel(f"{APP_VERSION}  ·  PERSONAL AI SYSTEM")
+        self._sub_lbl = QLabel("PERSONAL AI SYSTEM")
         self._sub_lbl.setFont(px_font(9, QFont.Weight.DemiBold, spacing=2.2))
         self._sub_lbl.setStyleSheet(f"color: {C.PRI_DIM}; background: transparent;")
         name_col.addWidget(self._sub_lbl)
@@ -1352,7 +1351,6 @@ class MainWindow(QMainWindow):
         self._status_strip.set_items([
             (f"ENGINE · {getattr(self, '_engine_label', 'GEMINI LIVE')}", "GREEN"),
             mic,
-            (f"PROTOCOL · {APP_PROTOCOL}", "PRI"),
         ])
 
     def _build_left_panel(self) -> QWidget:

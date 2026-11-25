@@ -188,12 +188,14 @@ class TestWindowBrandingSource(unittest.TestCase):
             '_read_full_config().get("assistant_name", "Jarvis") or "Jarvis"', self.content
         )
 
-    def test_window_restored_branding_elements(self):
-        # Restored product branding subtitle and protocol status
-        self.assertIn(
+    def test_window_omits_openagent_subtitle_and_protocol_labels(self):
+        # Header subtitle shows PERSONAL AI SYSTEM without APP_VERSION prefix,
+        # and footer status strip omits the PROTOCOL · APP_PROTOCOL label.
+        self.assertIn('self._sub_lbl = QLabel("PERSONAL AI SYSTEM")', self.content)
+        self.assertNotIn(
             'self._sub_lbl = QLabel(f"{APP_VERSION}  ·  PERSONAL AI SYSTEM")', self.content
         )
-        self.assertIn('(f"PROTOCOL · {APP_PROTOCOL}", "PRI")', self.content)
+        self.assertNotIn('(f"PROTOCOL · {APP_PROTOCOL}", "PRI")', self.content)
 
 
 class TestPromptRendering(unittest.TestCase):
