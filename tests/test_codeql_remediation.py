@@ -925,9 +925,7 @@ def test_gemini_api_key_reloads_after_config_file_is_created(tmp_path, monkeypat
     monkeypatch.setattr(gemini, "_KEY_FILE", config_file)
     monkeypatch.setattr(gemini, "_cached_key", None)
     monkeypatch.setattr(gemini, "_last_key_error", None)
-    monkeypatch.setattr(
-        config_manager, "_restrict_existing_config_permissions", lambda: True
-    )
+    monkeypatch.setattr(config_manager, "_restrict_existing_config_permissions", lambda: True)
 
     assert gemini.api_key() == ""
     assert gemini._cached_key is None
