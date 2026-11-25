@@ -292,16 +292,21 @@ def test_dev_agent_job_snapshot_scrubs_stored_values() -> None:
     assert "[REDACTED]" in snap["request"]
 
 
-def test_cloud_logging_redacts_pairing_codes_while_operator_output_preserves_them(capsys) -> None:
-    pair = cloud.make_pair_code("192.0.2.1", 7443, "supersecretpairingtoken12345", "a" * 64)
-    cloud._say(f"log leaked {pair}")
-    out_log = capsys.readouterr().out
-    assert "supersecretpairingtoken12345" not in out_log
-    assert "jarvis-cloud://[REDACTED]" in out_log
+def test_cloud_logging_redacts_pairing_codes_while_operator_output_preserves_them(
+    monkeypatch, capsys
+) -> None:
+    import io
+    import sys
 
+    pair = cloud.make_pair_code("192.0.2.1", 7443, "supersecretpairingtoken12345", "a" * 64)
+    sanitized = cloud._sanitize_log(f"log leaked {pair}")
+    assert "supersecretpairingtoken12345" not in sanitized
+    assert "jarvis-cloud://[REDACTED]" in sanitized
+
+    buf = io.StringIO()
+    monkeypatch.setattr(sys, "__stdout__", buf)
     cloud._write_operator_output(pair)
-    out_op = capsys.readouterr().out
-    assert pair in out_op
+    assert pair in buf.getvalue()
 
 
 def test_gemini_call_logs_no_raw_error_details_or_model_names(monkeypatch, capsys) -> None:
@@ -545,10 +550,16 @@ def test_all_credential_consumers_use_centralized_storage(monkeypatch, tmp_path)
         assert getattr(player._engine, "api_key", "") == "el-centralized-key"
         assert "memory/credential_store.py" in cloud.MANIFEST
 
-        rt = cloud.Runtime(state_dir=tmp_path / "cloud_state", workspace=tmp_path / "ws")
-        rt.apply_sync({"settings": {"gemini_api_key": "AIzaSyncedCloudKey1234567890"}})
-        assert config_manager.get_gemini_key() == "AIzaSyncedCloudKey1234567890"
-        assert "AIzaSyncedCloudKey1234567890" not in cfg_file.read_text(encoding="utf-8")
+        import sys
+
+        orig_stdout = sys.stdout
+        try:
+            rt = cloud.Runtime(state_dir=tmp_path / "cloud_state", workspace=tmp_path / "ws")
+            rt.apply_sync({"settings": {"gemini_api_key": "AIzaSyncedCloudKey1234567890"}})
+            assert config_manager.get_gemini_key() == "AIzaSyncedCloudKey1234567890"
+            assert "AIzaSyncedCloudKey1234567890" not in cfg_file.read_text(encoding="utf-8")
+        finally:
+            sys.stdout = orig_stdout
     finally:
         credential_store.register_external_provider(None)
 

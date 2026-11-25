@@ -174,16 +174,17 @@ def _say(text: str) -> None:
 
 
 def _write_operator_output(text: str) -> None:
-    """Write explicit operator-requested CLI output directly to stdout."""
+    """Write explicit operator-requested CLI output directly to real stdout."""
+    stream = sys.__stdout__ or sys.stdout
     out = str(text)
     if not out.endswith("\n"):
         out += "\n"
     try:
-        sys.stdout.write(out)
-        sys.stdout.flush()
+        stream.write(out)
+        stream.flush()
     except UnicodeEncodeError:
-        sys.stdout.write(out.encode("ascii", "replace").decode())
-        sys.stdout.flush()
+        stream.write(out.encode("ascii", "replace").decode())
+        stream.flush()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1587,8 +1588,9 @@ class _Tee:
             pass
         for line in str(text).splitlines():
             if line.strip():
-                stamp = "" if re.match(r"\[\d\d:\d\d:\d\d\]", line) else f"[{time.strftime('%H:%M:%S')}] "
-                self._sink.append(stamp + line)
+                safe_line = _sanitize_log(line)
+                stamp = "" if re.match(r"\[\d\d:\d\d:\d\d\]", safe_line) else f"[{time.strftime('%H:%M:%S')}] "
+                self._sink.append(stamp + safe_line)
         return len(text)
 
     def flush(self):
