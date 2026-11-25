@@ -376,14 +376,15 @@ def _cooling(model: str) -> bool:
 
 
 def api_key(refresh: bool = False) -> str:
-    """The Gemini key from config/api_keys.json. Cached; never raises."""
+    """The Gemini key from the centralized configuration reader; never raises."""
     global _cached_key
     with _key_lock:
         if _cached_key is not None and not refresh:
             return _cached_key
         try:
-            data = json.loads(_KEY_FILE.read_text(encoding="utf-8"))
-            new_key = str(data.get("gemini_api_key") or "")
+            from memory.config_manager import get_gemini_key
+
+            new_key = str(get_gemini_key() or "")
         except Exception:
             new_key = ""
         if _cached_key is not None and new_key != _cached_key:
@@ -794,20 +795,20 @@ def call(contents, tier: str = FAST, config=None,
             msg = str(e)
             if is_key_error(msg) and not model.startswith(PROVIDER_PREFIX):
                 key_refused = True
-                print(f"[Gemini] the API key was refused — {msg[:120]}")
+                print("[Gemini] the API key was refused")
             elif is_quota_error(msg):
                 _cool(model)
-                print(f"[Gemini] {model}: out of quota — skipping it for "
+                print("[Gemini] model out of quota — skipping it for "
                       f"{_COOLDOWN_SECONDS // 60} minutes")
             elif is_gone_error(msg):
                 _cool(model, _GONE_SECONDS)
-                print(f"[Gemini] {model}: unavailable to this key — set aside")
+                print("[Gemini] model unavailable to this key — set aside")
             elif is_unavailable_error(msg):
                 _cool(model, _UNAVAILABLE_SECONDS)
-                print(f"[Gemini] {model}: not answering — resting it for "
+                print("[Gemini] model not answering — resting it for "
                       f"{_UNAVAILABLE_SECONDS // 60} minutes")
             else:
-                print(f"[Gemini] {model}: {type(e).__name__}: {msg[:140]}")
+                print(f"[Gemini] request failed ({type(e).__name__})")
     return None
 
 

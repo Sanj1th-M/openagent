@@ -26,8 +26,9 @@ MODEL_PLANNER    = gemini.SMART
 MODEL_WRITER     = gemini.SMART
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    from memory.config_manager import get_gemini_key
+
+    return get_gemini_key() or ""
 
 
 def _coding_provider() -> str:
@@ -686,13 +687,32 @@ _PHASES = {"improve": ["reading", "planning", "writing", "checking", "testing"],
            "build": ["planning", "writing", "installing", "testing"]}
 
 
+def _redact_credentials(value: str) -> str:
+    """Remove common secrets before they enter durable job diagnostics."""
+    text = str(value)
+    labels = r"api[_-]?key|token|password|authorization|secret|credential"
+    text = re.sub(rf"(?i)((?:{labels})\s*[:=]\s*)([^\s,;]+)", r"\1[REDACTED]", text)
+    text = re.sub(r"(?i)\bBearer\s+[^\s,;]+", "Bearer [REDACTED]", text)
+    return text
+
+
+def _scrub_job_value(value):
+    if isinstance(value, str):
+        return _redact_credentials(value)
+    if isinstance(value, list):
+        return [_scrub_job_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _scrub_job_value(item) for key, item in value.items()}
+    return value
+
+
 def _new_job(folder: Path, model: str, instruction: str, player,
              kind: str = "improve") -> None:
     global _JOB, _player_ref
     with _state_lock:
-        _JOB = {"folder": folder.name, "path": str(folder), "model": model,
+        _JOB = {"folder": _redact_credentials(folder.name), "path": _redact_credentials(str(folder)), "model": _redact_credentials(model),
                 "kind": kind, "phases": _PHASES[kind],
-                "request": instruction, "status": "starting",
+                "request": _redact_credentials(instruction), "status": "starting",
                 "started": time.time(), "finished": None, "summary": "",
                 "files": {}, "steps": [], "result": ""}
     _player_ref = player
@@ -725,11 +745,12 @@ def _update(status: str | None = None, file: str | None = None,
             _JOB["status"] = status
         if file and file_state:
             _JOB["files"].setdefault(file, {})["state"] = file_state
-        _JOB.update(fields)
+        _JOB.update(_scrub_job_value(fields))
     _publish()
 
 
 def _log(player, msg: str) -> None:
+    msg = _redact_credentials(msg)
     try:
         print(f"[DevAgent] {msg}")
     except UnicodeEncodeError:       # a console on a legacy code page
