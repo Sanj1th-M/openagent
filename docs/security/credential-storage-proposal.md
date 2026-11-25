@@ -14,10 +14,11 @@ Keep `config/api_keys.json` as the single source for non-secret settings. Replac
 
 1. On read, recognize both legacy string values and versioned secret references. Legacy plaintext values remain readable during the migration window.
 2. Offer an explicit migration action in settings with a clear list of credential fields to move and the target OS vault. Do not migrate on ordinary app startup or silently alter a user's config.
-3. For each secret, write it to the vault and read it back to verify exact equality. Only after verification, atomically replace that field in JSON with its versioned reference. Preserve other fields and existing atomic-write/permission protections.
-4. If any vault write or JSON update fails, keep the corresponding legacy value intact and report which entries were not migrated. Do not delete the only working copy.
-5. After a successful migration, offer removal of plaintext from known backup files as a separate, explicit cleanup step. Explain that old copies on backups, snapshots, or disk media cannot be reliably erased by the app.
-6. During the transition release, continue resolving legacy strings and references. Add a migration-status report that distinguishes migrated, legacy, missing-vault, and inaccessible-vault entries. A future release may stop accepting legacy strings only after a published deprecation period and a user-visible export/recovery path.
+3. Before replacing any credential value, inventory every direct reader of `config/api_keys.json` and move it behind the configuration manager or a common credential-resolving API. This includes `core/gemini.py`, action/service helpers, provider consumers, and plugin consumers. Add tests proving that every consumer receives the resolved credential rather than the reference object. Do not migrate a field while any reader can still access its raw JSON value.
+4. For each secret, write it to the vault and read it back to verify exact equality. Only after verification, atomically replace that field in JSON with its versioned reference. Preserve other fields and existing atomic-write/permission protections.
+5. If any vault write or JSON update fails, keep the corresponding legacy value intact and report which entries were not migrated. Do not delete the only working copy.
+6. After a successful migration, offer removal of plaintext from known backup files as a separate, explicit cleanup step. Explain that old copies on backups, snapshots, or disk media cannot be reliably erased by the app.
+7. During the transition release, continue resolving legacy strings and references. Add a migration-status report that distinguishes migrated, legacy, missing-vault, and inaccessible-vault entries. A future release may stop accepting legacy strings only after a published deprecation period and a user-visible export/recovery path.
 
 ## Backup, restore, and portability
 
