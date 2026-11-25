@@ -72,9 +72,8 @@ jobs:
           bandit -ll -r actions core gui memory plugins main.py ui.py setup.py tests
 
       - name: Run Dependency Audit (Dry-Run / Report)
-        continue-on-error: true
         run: |
-          pip-audit -r requirements.txt || true
+          pip-audit -r requirements.txt
 
   test:
     name: Test Suite (${{ matrix.os }} · Python ${{ matrix.python-version }})
