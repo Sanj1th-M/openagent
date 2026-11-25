@@ -17,7 +17,7 @@ analysed again.
 | 15 | stack-trace exposure | Fixed on PR branch | `/api/upload` returns generic `{"error": "Upload failed"}` while logging only the exception class locally. |
 | 7-14, 6, 3 | clear-text logging | Fixed on PR branch | `core/gemini.py` (recoverable key read, no model/raw error logs), `main.py` (no device names/raw exceptions, `dev_agent` args omitted from tool logs), `core/audio_devices.py`, `actions/reminder.py`, and `actions/dev_agent.py` (comprehensive credential/URI scrubber, pre-truncation redaction, scrubbed job snapshots). |
 | 2 | clear-text logging (`providers/_tests.py`) | Fixed on PR branch | `providers/_tests.py` logs only non-secret `base_url` failure detail rather than the full provider config dict. |
-| 4, 5 | clear-text logging (`core/cloud.py`) | Separated operator output | Intentional `--init` / `--pair-code` / `--rotate` CLI pairing output uses `_write_operator_output()`, separated from generic `_say()` logging which redacts pairing URIs, bearer tokens, and labeled secrets. |
+| 4, 5 | clear-text logging (`core/cloud.py`) | Separated operator output | Intentional `--init` / `--pair-code` / `--rotate` CLI pairing output uses `_write_operator_output()` writing directly to `sys.__stdout__` (bypassing `HeadlessPlayer`'s `_Tee` log buffer), separated from generic `_say()` logging which redacts pairing URIs, bearer tokens, and labeled secrets. Note: CodeQL PR check still flags `_write_operator_output()` on the intentional `--pair-code` CLI output and `_say()` via `load_api_keys()` -> `get_assistant_name()` (false positive on non-secret `assistant_name`); neither is suppressed. |
 | 1 | clear-text storage | Fixed on PR branch | `memory/credential_store.py` + `memory/config_manager.py` store Gemini, provider `api_key`s, plugin secrets (`bot_token`, `pair_code`, etc.), and `elevenlabs_api_key` via Windows Credential Manager (`win32cred`), macOS Keychain / Linux Secret Service (`keyring`), or env/`CREDENTIALS_DIRECTORY`/external provider on headless Linux—never silently falling back to plaintext JSON. All direct readers/writers across `main.py`, `gui/`, `dashboard/`, `core/`, and `actions/` are centralized, with verified read-back migration and POSIX `0o700`/`0o600` permission hardening. |
 
 ## Verification
@@ -29,7 +29,7 @@ analysed again.
   - `mypy tests/`: passed.
   - `bandit -ll -r actions core gui memory plugins main.py ui.py setup.py tests`: 0 Medium/High issues.
   - `pip-audit -r requirements.txt`: no known vulnerabilities found.
-- GitHub Actions CI and CodeQL PR checks are tracked on draft PR #6 (`security/codeql-remaining-alerts` -> `main`).
+- GitHub Actions CI and CodeQL PR checks are tracked on draft PR #6 (`security/codeql-remaining-alerts` -> `main`). On commit `0c7c580`, all CI/CD and Security jobs passed across Ubuntu (`3.11`, `3.12`), Windows (`3.11`, `3.12`), and macOS (`3.11`), including Ruff, Mypy, Bandit, pip-audit, Packaging, and `CodeQL - Static analysis`; the CodeQL PR gate reported only the `core/cloud.py` `_write_operator_output` (`--pair-code` secret), `_say` (`load_api_keys().get("assistant_name")` false positive), and `_Tee.write` findings.
 
 ## Recovery and migration
 

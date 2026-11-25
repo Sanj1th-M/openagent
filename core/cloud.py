@@ -174,8 +174,10 @@ def _say(text: str) -> None:
 
 
 def _write_operator_output(text: str) -> None:
-    """Write explicit operator-requested CLI output directly to real stdout."""
-    stream = sys.__stdout__ or sys.stdout
+    """Write explicit operator-requested CLI output directly to the terminal stdout."""
+    stream = sys.__stdout__
+    if stream is None:
+        return
     out = str(text)
     if not out.endswith("\n"):
         out += "\n"
