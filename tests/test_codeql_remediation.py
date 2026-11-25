@@ -425,7 +425,11 @@ def test_cloud_logging_redacts_pairing_codes_while_operator_output_preserves_the
     assert "supersecretpairingtoken12345" not in sanitized
     assert "jarvis-cloud://[REDACTED]" in sanitized
 
-    buf = io.StringIO()
+    class _InteractiveTTY(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    buf = _InteractiveTTY()
     monkeypatch.setattr(sys, "__stdout__", buf)
     cloud._write_operator_output(pair)
     assert pair in buf.getvalue()
