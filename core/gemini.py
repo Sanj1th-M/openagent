@@ -381,26 +381,46 @@ def api_key(refresh: bool = False) -> str:
     global _cached_key, _last_key_error
     with _key_lock:
         _last_key_error = None
-        if not _KEY_FILE.exists():
-            _cached_key = ""
-            return _cached_key
         try:
+            # Keep existence checks inside the protected path: Path.exists()
+            # may raise PermissionError on an inaccessible parent directory.
+            if not _KEY_FILE.exists():
+                # A missing file is not a successfully cached empty key. The
+                # file may be created later without restarting the application.
+                _cached_key = None
+                return ""
+
             from memory.config_manager import _restrict_existing_config_permissions
             if not _restrict_existing_config_permissions():
                 _cached_key = None
                 _last_key_error = "permission"
                 return ""
+        except PermissionError:
+            _cached_key = None
+            _last_key_error = "permission"
+            return ""
         except Exception:
             _cached_key = None
             _last_key_error = "permission"
             return ""
+
         if _cached_key is not None and not refresh:
             return _cached_key
         try:
             data = json.loads(_KEY_FILE.read_text(encoding="utf-8"))
             new_key = str(data.get("gemini_api_key") or "")
+        except PermissionError:
+            # Do not cache a failed read as an empty credential: permissions
+            # can be repaired while the application remains running.
+            _cached_key = None
+            _last_key_error = "permission"
+            return ""
         except Exception:
-            new_key = ""
+            # Likewise, allow a transient I/O or malformed-file failure to be
+            # retried instead of permanently caching an empty result.
+            _cached_key = None
+            _last_key_error = "read"
+            return ""
         if _cached_key is not None and new_key != _cached_key:
             # What a model answered to the old key says nothing about the new one.
             with _cool_lock:
