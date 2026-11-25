@@ -85,9 +85,14 @@ def _dashboard_bind_host() -> str:
     return host if host in {"127.0.0.1", "::1", "0.0.0.0"} else "127.0.0.1"
 
 
+def _url_host(host: str) -> str:
+    """Bracket bare IPv6 addresses before appending a port."""
+    return f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+
 def _https_redirect_target(request_url, local_ip: str) -> str:
     """Preserve path/query while pinning the redirect authority locally."""
-    return str(request_url.replace(scheme="https", netloc=f"{local_ip}:{SECURE_PORT}"))
+    return str(request_url.replace(scheme="https", netloc=f"{_url_host(local_ip)}:{SECURE_PORT}"))
 
 
 def _make_uploads_dir() -> Path:
@@ -109,9 +114,9 @@ UPLOADS_DIR = _make_uploads_dir()
 
 def _get_gemini_key() -> str | None:
     try:
-        import json as _json
-        with open(BASE_DIR / "config" / "api_keys.json", "r", encoding="utf-8") as f:
-            return _json.load(f).get("gemini_api_key")
+        from memory.config_manager import get_gemini_key
+
+        return get_gemini_key()
     except Exception:
         return None
 
@@ -828,9 +833,10 @@ class DashboardServer:
     def get_url(self) -> str:
         """The full URL the QR code carries — always with its scheme, so a
         scanner never has to guess."""
+        host = _url_host(self._public_host())
         if self._ssl_enabled():
-            return f"https://{self._public_host()}:{SECURE_PORT}"
-        return f"http://{self._public_host()}:{PORT}"
+            return f"https://{host}:{SECURE_PORT}"
+        return f"http://{host}:{PORT}"
 
     def _public_host(self) -> str:
         return self._ip if self._bind_host == "0.0.0.0" else self._bind_host

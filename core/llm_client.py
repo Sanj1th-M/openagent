@@ -16,6 +16,7 @@ Supports two backends — selected via  "llm_provider"  in config/api_keys.json:
         Note: tool-calling support depends on the model; use a model that
         supports function/tool calls (e.g. Qwen2.5, Llama-3.1, Mistral).
 """
+import ipaddress
 import json
 import re
 import subprocess
@@ -23,6 +24,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Callable, Generator
+from urllib.parse import urlsplit
 
 import requests
 
@@ -73,7 +75,7 @@ def ensure_ollama_running(timeout: int = 15) -> bool:
         # by the user — we just check if they're reachable.
         health = f"{url}/v1/models"
         try:
-            ok = requests.get(health, timeout=5).status_code == 200
+            ok = requests.get(health, timeout=5, allow_redirects=False).status_code == 200
             if ok:
                 print(f"[LLM] OpenAI-compatible server reachable at {url}")
             else:
@@ -91,7 +93,7 @@ def ensure_ollama_running(timeout: int = 15) -> bool:
 
     def _is_up() -> bool:
         try:
-            return requests.get(health, timeout=3).status_code == 200
+            return requests.get(health, timeout=3, allow_redirects=False).status_code == 200
         except Exception:
             return False
 
@@ -156,8 +158,9 @@ def warmup_model(system_prompt: str | None = None) -> bool:
             "max_tokens": 1,
         }
         try:
-            resp = requests.post(f"{url}/v1/chat/completions", json=payload, timeout=180)
-            resp.raise_for_status()
+            resp = requests.post(f"{url}/v1/chat/completions", json=payload, timeout=180, allow_redirects=False)
+            if not 200 <= resp.status_code < 300:
+                raise RuntimeError(f"HTTP {resp.status_code}")
             print(f"[LLM] '{model}' ready (OpenAI-compatible server).")
             return True
         except Exception as e:
@@ -175,8 +178,9 @@ def warmup_model(system_prompt: str | None = None) -> bool:
         "options":    {"num_predict": 1, "num_gpu": 99},
     }
     try:
-        resp = requests.post(f"{url}/api/chat", json=payload, timeout=180)
-        resp.raise_for_status()
+        resp = requests.post(f"{url}/api/chat", json=payload, timeout=180, allow_redirects=False)
+        if not 200 <= resp.status_code < 300:
+            raise RuntimeError(f"HTTP {resp.status_code}")
         print(f"[LLM] '{model}' loaded and KV cache primed.")
         return True
     except Exception as e:
@@ -195,8 +199,9 @@ def check_model_available(log: Callable | None = None) -> bool:
 
     url, model = get_llm_settings()
     try:
-        resp = requests.get(f"{url}/api/tags", timeout=5)
-        resp.raise_for_status()
+        resp = requests.get(f"{url}/api/tags", timeout=5, allow_redirects=False)
+        if not 200 <= resp.status_code < 300:
+            raise RuntimeError(f"HTTP {resp.status_code}")
         pulled = [m.get("name", "") for m in resp.json().get("models", [])]
         model_base = model.split(":")[0]
         found = any(
@@ -218,10 +223,46 @@ def check_model_available(log: Callable | None = None) -> bool:
         return True   # Ollama might still be starting up; non-blocking
 
 
+def _validate_llm_url(raw_url: str) -> str:
+    """Validate and normalize a local/OpenAI-compatible LLM base URL."""
+    url = str(raw_url or "").strip().rstrip("/")
+    if not url or any(ch.isspace() or ord(ch) < 32 for ch in url):
+        raise ValueError("Invalid LLM URL")
+    if "://" not in url:
+        url = "http://" + url
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError("Invalid LLM URL") from exc
+    if (
+        parsed.scheme.lower() not in ("http", "https")
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Invalid LLM URL")
+    host = hostname.rstrip(".").lower()
+    if host in {"metadata.google.internal", "metadata.goog", "instance-data"}:
+        raise ValueError("Invalid LLM URL")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None:
+        check = getattr(ip, "ipv4_mapped", None) or ip
+        if check.is_link_local or check.is_unspecified or check.is_multicast:
+            raise ValueError("Invalid LLM URL")
+    return f"{parsed.scheme.lower()}://{parsed.netloc}{parsed.path}".rstrip("/")
+
+
 def get_llm_settings() -> tuple[str, str]:
     """Returns (base_url, model_name)."""
     cfg   = _load_config()
-    url   = cfg.get("llm_url",   _DEFAULTS["llm_url"]).rstrip("/")
+    url   = _validate_llm_url(cfg.get("llm_url", _DEFAULTS["llm_url"]))
     model = cfg.get("llm_model", _DEFAULTS["llm_model"])
     return url, model
 
@@ -252,8 +293,9 @@ def call_llm(
             payload["tools"]       = tools
             payload["tool_choice"] = "auto"
         try:
-            resp = requests.post(endpoint, json=payload, timeout=timeout)
-            resp.raise_for_status()
+            resp = requests.post(endpoint, json=payload, timeout=timeout, allow_redirects=False)
+            if not 200 <= resp.status_code < 300:
+                raise RuntimeError(f"HTTP {resp.status_code}")
             choice = resp.json().get("choices", [{}])[0]
             msg    = choice.get("message", {})
             # OpenAI tool_calls format → normalise to Ollama-style
@@ -292,8 +334,9 @@ def call_llm(
         payload["tools"] = tools
 
     try:
-        resp = requests.post(endpoint, json=payload, timeout=timeout)
-        resp.raise_for_status()
+        resp = requests.post(endpoint, json=payload, timeout=timeout, allow_redirects=False)
+        if not 200 <= resp.status_code < 300:
+            raise RuntimeError(f"HTTP {resp.status_code}")
         data = resp.json()
         msg  = data.get("message", {})
         return {
@@ -304,8 +347,9 @@ def call_llm(
         print(f"[LLM] ConnectionError — trying to restart Ollama… ({e})")
         if ensure_ollama_running():
             try:
-                resp = requests.post(endpoint, json=payload, timeout=timeout)
-                resp.raise_for_status()
+                resp = requests.post(endpoint, json=payload, timeout=timeout, allow_redirects=False)
+                if not 200 <= resp.status_code < 300:
+                    raise RuntimeError(f"HTTP {resp.status_code}")
                 data = resp.json()
                 msg  = data.get("message", {})
                 return {
@@ -350,14 +394,16 @@ def call_llm_text(
     payload = {"model": m, "messages": messages, "stream": False, "keep_alive": -1, "options": {"num_predict": 600}}
 
     try:
-        resp = requests.post(endpoint, json=payload, timeout=timeout)
-        resp.raise_for_status()
+        resp = requests.post(endpoint, json=payload, timeout=timeout, allow_redirects=False)
+        if not 200 <= resp.status_code < 300:
+            raise RuntimeError(f"HTTP {resp.status_code}")
         return (resp.json().get("message", {}).get("content") or "").strip()
     except requests.exceptions.ConnectionError:
         if ensure_ollama_running():
             try:
-                resp = requests.post(endpoint, json=payload, timeout=timeout)
-                resp.raise_for_status()
+                resp = requests.post(endpoint, json=payload, timeout=timeout, allow_redirects=False)
+                if not 200 <= resp.status_code < 300:
+                    raise RuntimeError(f"HTTP {resp.status_code}")
                 return (resp.json().get("message", {}).get("content") or "").strip()
             except Exception:
                 pass
@@ -394,8 +440,9 @@ def _stream_openai(
         payload["tool_choice"] = "auto"
 
     try:
-        with requests.post(endpoint, json=payload, timeout=timeout, stream=True) as resp:
-            resp.raise_for_status()
+        with requests.post(endpoint, json=payload, timeout=timeout, stream=True, allow_redirects=False) as resp:
+            if not 200 <= resp.status_code < 300:
+                raise RuntimeError(f"HTTP {resp.status_code}")
             full_content = ""
             buf          = ""
             # tool_call fragments: index → {"id", "function": {"name", "arguments"}}
@@ -521,8 +568,9 @@ def call_llm_stream(
         payload["tools"] = tools
 
     def _do_stream() -> Generator[dict, None, None]:
-        with requests.post(endpoint, json=payload, timeout=timeout, stream=True) as resp:
-            resp.raise_for_status()
+        with requests.post(endpoint, json=payload, timeout=timeout, stream=True, allow_redirects=False) as resp:
+            if not 200 <= resp.status_code < 300:
+                raise RuntimeError(f"HTTP {resp.status_code}")
             full_content = ""
             tool_calls:  list = []
             buf          = ""

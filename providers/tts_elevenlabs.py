@@ -61,6 +61,7 @@ _MP3 = "mp3_44100_128"
 # The shape of a voice ID: one run of letters and digits. A voice NAME almost
 # never looks like that — it has spaces, punctuation, or is far shorter.
 _VOICE_ID = re.compile(r"[A-Za-z0-9]{16,40}")
+_SAFE_VOICE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 def _match_voice(wanted: str, voices: list[tuple[str, str]]) -> str:
@@ -132,11 +133,13 @@ class ElevenLabsTTS:
         }
 
     async def _stream_once(self, cl, text: str, fmt: str) -> AsyncIterator[bytes]:
+        if not _SAFE_VOICE_ID.fullmatch(self.voice_id):
+            raise RuntimeError("invalid ElevenLabs voice ID")
         url = f"{API}/text-to-speech/{self.voice_id}/stream"
         async with cl.stream("POST", url, headers=self._headers(),
                              params={"output_format": fmt},
                              json=self._payload(text)) as r:
-            if r.status_code >= 400:
+            if not 200 <= r.status_code < 300:
                 body = (await r.aread()).decode("utf-8", "replace")
                 raise _HttpError(r.status_code, body)
             async for piece in r.aiter_bytes():
@@ -157,7 +160,7 @@ class ElevenLabsTTS:
         if not text:
             return
 
-        async with httpx.AsyncClient(timeout=60.0) as cl:
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=False) as cl:
             fmt = self._format or _PCM
             try:
                 async for piece in self._emit(cl, text, fmt):
@@ -200,9 +203,9 @@ class ElevenLabsTTS:
     def voices(self) -> list[tuple[str, str]]:
         """(id, name) for every voice on the account."""
         import httpx
-        with httpx.Client(timeout=15.0) as cl:
+        with httpx.Client(timeout=15.0, follow_redirects=False) as cl:
             r = cl.get(f"{API}/voices", headers={"xi-api-key": self.key})
-            if r.status_code >= 400:
+            if not 200 <= r.status_code < 300:
                 raise RuntimeError(f"{r.status_code} {_message(r.text)}")
             return [(v.get("voice_id", ""), v.get("name", ""))
                     for v in (r.json().get("voices") or [])]

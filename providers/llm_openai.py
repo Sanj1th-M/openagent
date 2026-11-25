@@ -30,6 +30,7 @@ WHAT IS DELIBERATELY NOT HERE
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import json
 import time
 from importlib.util import find_spec
@@ -170,6 +171,20 @@ CATALOG = (
 )
 
 
+def _is_disallowed_host(hostname: str) -> bool:
+    """Reject link-local metadata, unspecified, and multicast targets."""
+    host = hostname.rstrip(".").lower()
+    if host in {"metadata.google.internal", "metadata.goog", "instance-data"}:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    mapped = getattr(ip, "ipv4_mapped", None)
+    check = mapped if mapped is not None else ip
+    return bool(check.is_link_local or check.is_unspecified or check.is_multicast)
+
+
 def _normalise(url: str) -> str:
     """Whatever the user pasted, turned into a base URL that works.
 
@@ -181,7 +196,7 @@ def _normalise(url: str) -> str:
         like the server is down.
     """
     url = (url or "").strip().rstrip("/")
-    if not url:
+    if not url or any(ch.isspace() or ord(ch) < 32 for ch in url):
         return ""
     if "://" not in url:
         url = "http://" + url
@@ -198,10 +213,11 @@ def _normalise(url: str) -> str:
         or parsed.password is not None
         or parsed.query
         or parsed.fragment
+        or _is_disallowed_host(hostname)
     ):
         return ""
     host = parsed.netloc
-    if hostname.lower() == "localhost":
+    if hostname.rstrip(".").lower() == "localhost":
         host = "127.0.0.1" + (f":{port}" if port is not None else "")
     path = parsed.path
     url = f"{parsed.scheme.lower()}://{host}{path}".rstrip("/")
@@ -212,12 +228,18 @@ def _normalise(url: str) -> str:
     return url
 
 
+def _parsed_hostname(url: str) -> str:
+    """Return the normalized hostname from a URL, or '' on parse error."""
+    try:
+        return (urlsplit(url).hostname or "").rstrip(".").lower()
+    except ValueError:
+        return ""
+
+
 def _uses_host(url: str, hostname: str) -> bool:
     """Match a provider by parsed hostname, never by a URL substring."""
-    try:
-        return urlsplit(url).hostname == hostname
-    except ValueError:
-        return False
+    parsed = _parsed_hostname(url)
+    return bool(parsed) and parsed == hostname.rstrip(".").lower()
 
 
 def _uses_https(url: str) -> bool:
@@ -255,21 +277,34 @@ def _is_own_hardware(url: str) -> bool:
     That machine has the same CPU-bound prompt processing as this one, so it
     wants the same budget; a hosted endpoint does not.
     """
-    host = url.partition("://")[2].partition("/")[0].partition(":")[0].lower()
-    if host in ("localhost", "::1") or host.startswith("127."):
+    host = _parsed_hostname(url)
+    if not host:
+        return False
+    if _is_loopback(url):
         return True
     if host.endswith(".local") or host.endswith(".lan"):
         return True
-    parts = host.split(".")
-    if len(parts) == 4 and all(p.isdigit() for p in parts):
-        a, b = int(parts[0]), int(parts[1])
-        return a == 10 or (a == 192 and b == 168) or (a == 172 and 16 <= b <= 31)
-    return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    mapped = getattr(ip, "ipv4_mapped", None)
+    check = mapped if mapped is not None else ip
+    return bool(check.is_private and not check.is_link_local and not check.is_unspecified)
 
 
 def _is_loopback(url: str) -> bool:
-    host = url.partition("://")[2].partition("/")[0].partition(":")[0].lower()
-    return host in ("127.0.0.1", "::1", "localhost") or host.startswith("127.")
+    host = _parsed_hostname(url)
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    mapped = getattr(ip, "ipv4_mapped", None)
+    return bool((mapped or ip).is_loopback)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -485,6 +520,8 @@ class OpenAICompatLLM:
                  temperature: float | None = None) -> tuple[str, list[FunctionCall]]:
         """Text and any tool calls. Raises on failure so the ladder can read the
         error, classify it and rest this rung exactly as it rests a Gemini one."""
+        if not self.base:
+            raise ValueError("Invalid provider base URL")
         try:
             with self._httpx.Client(timeout=timeout or self.timeout,
                                     trust_env=self._trust_env,
@@ -514,6 +551,8 @@ class OpenAICompatLLM:
         the end. Streaming is what lets speech start before the sentence is
         finished; a server that cannot stream still works, it just answers all
         at once."""
+        if not self.base:
+            raise ValueError("Invalid provider base URL")
         body = self._body(messages, tools, stream, temperature)
 
         # Not wrapped with the address here: the streaming path is only used by
@@ -601,6 +640,8 @@ class OpenAICompatLLM:
     def models(self, timeout: float = 8.0) -> list[str]:
         """What this endpoint offers, so the panel can present a list instead of
         asking someone to type a model name exactly right."""
+        if not self.base:
+            raise ValueError("Invalid provider base URL")
         with self._httpx.Client(timeout=timeout,
                                 trust_env=self._trust_env,
                                 follow_redirects=False) as cl:
