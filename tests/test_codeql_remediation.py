@@ -915,6 +915,8 @@ def test_dev_agent_successful_job_redacts_result_and_notification(capsys, tmp_pa
         json.dumps(dev_agent._job_snapshot()),
         json.dumps(player.snapshots),
     )
+
+
 def test_gemini_api_key_reloads_after_config_file_is_created(tmp_path, monkeypatch):
     from core import gemini
     from memory import config_manager
