@@ -43,6 +43,128 @@ def test_provider_hostname_matching_requires_an_exact_host() -> None:
     assert not _uses_host(_normalise(f"https://attacker.test/{expected}/v1"), expected)
 
 
+@pytest.mark.anyio
+async def test_open_stream_host_matching_prevents_gemini_substring_bypass(monkeypatch) -> None:
+    from providers import llm_openai
+
+    monkeypatch.setattr(llm_openai, "_gemini_rest", {})
+
+    def _make_async_client(responses: list[tuple[int, list[str]]], recorded: list[dict[str, Any]]):
+        class _FakeStreamResp:
+            def __init__(self, status_code: int, lines: list[str]) -> None:
+                self.status_code = status_code
+                self._lines = lines
+
+            async def __aenter__(self) -> "_FakeStreamResp":
+                return self
+
+            async def __aexit__(self, *args: Any) -> None:
+                return None
+
+            async def aread(self) -> bytes:
+                return b"rate limited"
+
+            async def aiter_lines(self):
+                for line in self._lines:
+                    yield line
+
+        class _FakeAsyncClient:
+            def __init__(self, **kwargs: Any) -> None:
+                recorded.append({"client_kwargs": kwargs})
+
+            async def __aenter__(self) -> "_FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, *args: Any) -> None:
+                return None
+
+            def stream(self, method: str, url: str, **kwargs: Any) -> _FakeStreamResp:
+                recorded.append({"method": method, "url": url, "json": kwargs.get("json")})
+                status_code, lines = responses.pop(0)
+                return _FakeStreamResp(status_code, lines)
+
+        return _FakeAsyncClient
+
+    # 1. Valid HTTPS Gemini provider URL triggers Gemini fallback and reasoning_effort.
+    gemini_calls: list[dict[str, Any]] = []
+    llm_gemini = OpenAICompatLLM(
+        {
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+            "model": "gemini-2.5-flash",
+            "api_key": "k",
+        }
+    )
+    monkeypatch.setattr(
+        llm_gemini._httpx,
+        "AsyncClient",
+        _make_async_client(
+            [(429, []), (200, ['data: {"choices":[{"delta":{"content":"ok"}}]}', "data: [DONE]"])],
+            gemini_calls,
+        ),
+    )
+    chunks = [c async for c in llm_gemini.chat([{"role": "user", "content": "hi"}], stream=True)]
+    assert chunks == [{"text": "ok"}]
+    req_calls = [c for c in gemini_calls if "url" in c]
+    assert len(req_calls) == 2
+    assert req_calls[0]["json"]["reasoning_effort"] == "low"
+
+    # 2. Substring-bypass hostnames must NOT be treated as Gemini (no spare fallback or reasoning_effort).
+    for bypass_url in (
+        "https://generativelanguage.googleapis.com.attacker.test/v1",
+        "https://attacker.test/generativelanguage.googleapis.com/v1",
+    ):
+        bypass_calls: list[dict[str, Any]] = []
+        llm_bypass = OpenAICompatLLM(
+            {"base_url": bypass_url, "model": "gemini-2.5-flash", "api_key": "k"}
+        )
+        monkeypatch.setattr(
+            llm_bypass._httpx,
+            "AsyncClient",
+            _make_async_client([(429, [])], bypass_calls),
+        )
+        with pytest.raises(RuntimeError, match="429"):
+            async for _ in llm_bypass.chat([{"role": "user", "content": "hi"}], stream=True):
+                pass
+        bypass_reqs = [c for c in bypass_calls if "url" in c]
+        assert len(bypass_reqs) == 1
+        assert "reasoning_effort" not in bypass_reqs[0]["json"]
+
+    # 3. Malformed / unsafe URLs are rejected before any request is made.
+    for bad_url in (
+        "https://user:pass@generativelanguage.googleapis.com/v1",
+        "ftp://generativelanguage.googleapis.com/v1",
+        "http://169.254.169.254/v1",
+    ):
+        llm_bad = OpenAICompatLLM({"base_url": bad_url, "model": "gemini-2.5-flash"})
+        with pytest.raises(ValueError, match="Invalid provider base URL"):
+            async for _ in llm_bad.chat([{"role": "user", "content": "hi"}], stream=True):
+                pass
+
+    # 4. Legitimate local IPv4 and IPv6 provider URLs stream normally without Gemini handling.
+    for raw_url, expected_endpoint in (
+        ("http://localhost:11434/v1", "http://127.0.0.1:11434/v1/chat/completions"),
+        ("http://192.168.1.40:1234/v1", "http://192.168.1.40:1234/v1/chat/completions"),
+        ("http://[::1]:11434/v1", "http://[::1]:11434/v1/chat/completions"),
+    ):
+        local_calls: list[dict[str, Any]] = []
+        llm_local = OpenAICompatLLM({"base_url": raw_url, "model": "llama3"})
+        monkeypatch.setattr(
+            llm_local._httpx,
+            "AsyncClient",
+            _make_async_client(
+                [(200, ['data: {"choices":[{"delta":{"content":"local"}}]}', "data: [DONE]"])],
+                local_calls,
+            ),
+        )
+        local_chunks = [
+            c async for c in llm_local.chat([{"role": "user", "content": "hi"}], stream=True)
+        ]
+        assert local_chunks == [{"text": "local"}]
+        assert local_calls[0]["client_kwargs"]["follow_redirects"] is False
+        assert local_calls[1]["url"] == expected_endpoint
+        assert "reasoning_effort" not in local_calls[1]["json"]
+
+
 def test_script_json_cannot_end_an_inline_script() -> None:
     value = _script_json("</script><script>alert('xss')</script>")
     assert "</script" not in value.lower()
