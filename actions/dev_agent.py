@@ -320,7 +320,7 @@ def _open_vscode(project_dir: Path) -> bool:
     return False
 
 def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
-    print(f"[DevAgent] 🚀 Running: {run_command}")
+    print("[DevAgent] 🚀 Running project command.")
     try:
         parts = run_command.split()
         if parts[0].lower() == "python":
@@ -504,13 +504,17 @@ def _build_project(
     log(f"Project: {proj_name} | Files: {len(files)} | Entry: {entry_point}")
     with _state_lock:
         if _JOB:
-            _JOB["folder"] = proj_name
-            _JOB["path"] = str(project_dir)
-            _JOB["summary"] = (f"New {language} project '{proj_name}': "
-                               f"{len(files)} files, run with `{run_command}`.")
-            _JOB["files"] = {f.get("path", ""): {"action": "create", "state": "waiting",
-                                                 "what": str(f.get("description", ""))}
-                             for f in files if f.get("path")}
+            _JOB["folder"] = _redact_credentials(proj_name)
+            _JOB["path"] = _redact_credentials(str(project_dir))
+            _JOB["summary"] = _redact_credentials(
+                f"New {language} project '{proj_name}': "
+                f"{len(files)} files, run with `{run_command}`."
+            )
+            _JOB["files"] = _scrub_job_value({
+                f.get("path", ""): {"action": "create", "state": "waiting",
+                                     "what": str(f.get("description", ""))}
+                for f in files if f.get("path")
+            })
     _update("writing")
 
     def _dep_sort_key(fi: dict) -> int:
@@ -573,7 +577,7 @@ def _build_project(
     for attempt in range(1, MAX_FIX_ATTEMPTS + 1):
         log(f"Running project (attempt {attempt}/{MAX_FIX_ATTEMPTS})...")
         last_output = _run_project(run_command, project_dir, timeout)
-        log(f"Output preview: {last_output[:150]}")
+        log(_output_log_summary())
 
         if not _has_error(last_output, run_command):
             msg = (
@@ -582,7 +586,7 @@ def _build_project(
                 f"Saved to: {project_dir}"
             )
             if speak: speak(msg)
-            return f"{msg}\n\nOutput:\n{last_output}"
+            return f"{msg}\n\nOutput:\n{_redact_credentials(last_output)}"
 
         if attempt == MAX_FIX_ATTEMPTS:
             break
@@ -617,14 +621,14 @@ def _build_project(
             if speak: speak(msg)
             return msg
         except Exception as e:
-            log(f"Fix step failed: {e}")
+            log(f"Fix step failed: {_redact_credentials(str(e))}")
 
     msg = (
         f"I couldn't fully fix '{proj_name}' after {MAX_FIX_ATTEMPTS} attempts, sir. "
         f"Project is saved at {project_dir} — open it in VSCode and check manually."
     )
     if speak: speak(msg)
-    return f"{msg}\n\nLast error:\n{last_output[:600]}"
+    return f"{msg}\n\nLast error:\n{_redacted_preview(last_output, 600)}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -689,11 +693,57 @@ _PHASES = {"improve": ["reading", "planning", "writing", "checking", "testing"],
 
 def _redact_credentials(value: str) -> str:
     """Remove common secrets before they enter durable job diagnostics."""
-    text = str(value)
-    labels = r"api[_-]?key|token|password|authorization|secret|credential"
-    text = re.sub(rf"(?i)((?:{labels})\s*[:=]\s*)([^\s,;]+)", r"\1[REDACTED]", text)
-    text = re.sub(r"(?i)\bBearer\s+[^\s,;]+", "Bearer [REDACTED]", text)
-    return text
+    msg = str(value)
+    credential_labels = (
+        r"api[_-]?key|access[_-]?token|refresh[_-]?token|"
+        r"auth(?:orization|[_-]?token)|token|password|"
+        r"(?:aws[_-]?)?secret[_-]?access[_-]?key|secret|credential|client[_-]?secret"
+    )
+    msg = re.sub(
+        rf"(?im)((?:\\)?[\"']?(?:{credential_labels})(?:\\)?[\"']?\s*[:=]\s*)"
+        r"([\"'])((?:\\[\s\S]|(?!\2)[^\r\n\\])*)(?<!\\)$",
+        r"\1[REDACTED]",
+        msg,
+    )
+    msg = re.sub(
+        rf"(?im)(--(?:{credential_labels})(?:=\s*|\s+))([\"'])"
+        r"((?:\\[\s\S]|(?!\2)[^\r\n\\])*)(?<!\\)$",
+        r"\1[REDACTED]",
+        msg,
+    )
+    msg = re.sub(
+        r"(?i)\b([a-z][a-z0-9+.-]*://)[^/?#\s]+@",
+        r"\1[REDACTED]@",
+        msg,
+    )
+    msg = re.sub(r"(?i)\bjarvis-cloud://[^\s]+", "jarvis-cloud://[REDACTED]", msg)
+    msg = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", msg)
+    msg = re.sub(r"(?i)\bBasic\s+[A-Za-z0-9+/]+={0,2}", "Basic [REDACTED]", msg)
+    msg = re.sub(
+        r"(?i)(--(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization|[_-]?token)?|token|password|(?:aws[_-]?)?secret[_-]?access[_-]?key|secret|credential|client[_-]?secret)(?:=\s*|\s+))"
+        r"""((?:"(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'|(?:\\[\s\S]|[^\s]))+)""",
+        r"\1[REDACTED]",
+        msg,
+    )
+    msg = re.sub(
+        r"""(?i)((?:\\)?["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization|[_-]?token)|token|password|(?:aws[_-]?)?secret[_-]?access[_-]?key|secret|credential|client[_-]?secret)(?:\\)?["']?)"""
+        r"""(\s*[:=]\s*)((?:\\?"(?:[^"\\]|\\[\s\S])*\\?"|\\?'(?:[^'\\]|\\[\s\S])*\\?'|(?:\\[\s\S]|(?!,\s*["'][\w.-]+["']\s*:)[^\s]))+)""",
+        r"\1\2[REDACTED]",
+        msg,
+    )
+    msg = re.sub(r"\bAIza[0-9A-Za-z_-]{20,}\b", "[REDACTED]", msg)
+    msg = re.sub(r"\bsk-[A-Za-z0-9_-]{16,}\b", "[REDACTED]", msg)
+    return msg
+
+
+def _output_log_summary() -> str:
+    """Describe captured project output without copying it into diagnostics."""
+    return "Project output captured."
+
+
+def _redacted_preview(value: str, limit: int) -> str:
+    """Redact a complete diagnostic before truncating it for a result preview."""
+    return _redact_credentials(value)[:limit]
 
 
 def _scrub_job_value(value):
@@ -702,7 +752,7 @@ def _scrub_job_value(value):
     if isinstance(value, list):
         return [_scrub_job_value(item) for item in value]
     if isinstance(value, dict):
-        return {str(key): _scrub_job_value(item) for key, item in value.items()}
+        return {_redact_credentials(str(key)): _scrub_job_value(item) for key, item in value.items()}
     return value
 
 
@@ -722,7 +772,7 @@ def _new_job(folder: Path, model: str, instruction: str, player,
 def _job_snapshot() -> dict:
     with _state_lock:
         snap = json.loads(json.dumps(_JOB)) if _JOB else {}
-    return snap
+    return _scrub_job_value(snap)
 
 
 def _publish() -> None:
@@ -744,7 +794,8 @@ def _update(status: str | None = None, file: str | None = None,
         if status:
             _JOB["status"] = status
         if file and file_state:
-            _JOB["files"].setdefault(file, {})["state"] = file_state
+            safe_file = _redact_credentials(file)
+            _JOB["files"].setdefault(safe_file, {})["state"] = file_state
         _JOB.update(_scrub_job_value(fields))
     _publish()
 
@@ -1575,13 +1626,13 @@ def _run_job(job, name: str, who: str, speak=None, player=None) -> str:
                 status = "finished with problems"
         except Exception as e:
             status = "failed"
-            result = f"The coding job on '{name}' failed: {type(e).__name__}: {str(e)[:200]}"
+            result = f"The coding job on '{name}' failed: {type(e).__name__}: {_redacted_preview(str(e), 200)}"
             _log(player, result)
         finally:
             _job_lock.release()
         _update(status, result=result, finished=time.time())
         if speak:
-            speak(f"[DEV_AGENT_DONE] {result[:900]} | Tell the user briefly, in one "
+            speak(f"[DEV_AGENT_DONE] {_redacted_preview(result, 900)} | Tell the user briefly, in one "
                   f"or two sentences, what was done. Do not read file paths aloud.")
 
     threading.Thread(target=work, daemon=True, name="dev_agent-job").start()

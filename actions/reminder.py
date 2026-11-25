@@ -378,7 +378,7 @@ def _mirror_to_cloud(message: str, target_dt: datetime) -> str:
             return ""
         ok, detail = agent.mirror_reminder(message, target_dt.strftime("%Y-%m-%d %H:%M"))
     except Exception as e:
-        ok, detail = False, str(e)
+        ok, detail = False, type(e).__name__
     if ok:
         return " It will also be sent to the user's phone over Telegram at that time."
     return f" The phone copy could not be set ({detail}) — only this computer will remind them."

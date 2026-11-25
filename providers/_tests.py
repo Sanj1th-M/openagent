@@ -1013,7 +1013,7 @@ def test_panel_settings_survive():
             check("its address is filled in from the preset",
                   get_provider_config(OLLAMA).get("base_url", "")
                   .endswith("11434/v1"),
-                  str(get_provider_config(OLLAMA)))
+                  repr(get_provider_config(OLLAMA).get("base_url", "")))
 
         # -- typing survives a redraw ----------------------------------------
         if OLLAMA in ov._edits:
@@ -1030,24 +1030,36 @@ def test_panel_settings_survive():
                          "tts": "elevenlabs@elevenlabs"})
         ov._rebuild_body()
 
-        import pathlib
+        from memory import config_manager
+
         writes = [0]
-        real = pathlib.Path.write_text
+        attempts = [0]
+        real = config_manager.os.replace
 
-        def counted(self, *a, **k):
-            # The config is written to api_keys.json.tmp and moved into place
-            # in one step (memory/config_manager.py), so either name is a write.
-            if self.name in ("api_keys.json", "api_keys.json.tmp"):
+        def fail_once(src, dst, *a, **k):
+            if Path(dst) == config_manager.CONFIG_FILE and attempts[0] == 0:
+                attempts[0] += 1
+                raise PermissionError("simulated transient replacement failure")
+            if Path(dst) == config_manager.CONFIG_FILE:
+                attempts[0] += 1
+            return real(src, dst, *a, **k)
+
+        def counted(src, dst, *a, **k):
+            result = fail_once(src, dst, *a, **k)
+            if Path(dst) == config_manager.CONFIG_FILE:
                 writes[0] += 1
-            return real(self, *a, **k)
+            return result
 
-        pathlib.Path.write_text = counted
+        config_manager.os.replace = counted
         try:
             ov._apply()
         finally:
-            pathlib.Path.write_text = real
+            config_manager.os.replace = real
 
         check("APPLY writes the config once", writes[0] == 1, str(writes[0]))
+        check("a failed replacement retry is not counted as successful",
+              attempts[0] == 2 and writes[0] == 1,
+              f"attempts={attempts[0]}, successful={writes[0]}")
         check("the mode was stored", get_provider_mode() == "pipeline",
               get_provider_mode())
         check("all three slots were stored",
