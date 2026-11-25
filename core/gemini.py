@@ -384,9 +384,10 @@ def api_key(refresh: bool = False) -> str:
         try:
             from memory.config_manager import get_gemini_key
 
-            new_key = str(get_gemini_key() or "")
+            new_key = str(get_gemini_key(raise_on_permission=True) or "")
         except Exception:
-            new_key = ""
+            # Do not permanently cache an empty key on transient/permission errors.
+            return ""
         if _cached_key is not None and new_key != _cached_key:
             # What a model answered to the old key says nothing about the new one.
             with _cool_lock:

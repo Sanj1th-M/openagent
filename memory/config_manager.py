@@ -1,10 +1,17 @@
 import functools
 import json
 import os
+import stat
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import Any
+
+
+class ConfigPermissionError(PermissionError):
+    """Raised when configuration file/directory permissions cannot be secured."""
 
 def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -17,6 +24,45 @@ CONFIG_FILE = CONFIG_DIR / "api_keys.json"
 
 def ensure_config_dir() -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        try:
+            os.chmod(CONFIG_DIR, stat.S_IRWXU)
+        except OSError:
+            pass
+
+
+def _restrict_existing_config_permissions() -> bool:
+    """Ensure existing POSIX settings paths are owner-only before reading secrets."""
+    if os.name == "nt":
+        return True
+    if not CONFIG_FILE.exists():
+        return True
+    try:
+        owner = os.geteuid()
+        targets: list[tuple[Path, int]] = [
+            (CONFIG_DIR, stat.S_IRWXU),
+            (CONFIG_FILE, stat.S_IRUSR | stat.S_IWUSR),
+        ]
+        for path, mode in targets:
+            current = path.stat()
+            if current.st_uid != owner:
+                raise PermissionError("settings path is not owned by the current user")
+            current_mode = stat.S_IMODE(current.st_mode)
+            required_access = stat.S_IXUSR if path == CONFIG_DIR else stat.S_IRUSR
+            if current_mode & 0o077 or current_mode & required_access != required_access:
+                os.chmod(path, mode)
+                current = path.stat()
+                current_mode = stat.S_IMODE(current.st_mode)
+                if (
+                    current.st_uid != owner
+                    or current_mode & 0o077
+                    or current_mode & required_access != required_access
+                ):
+                    raise PermissionError("settings path permissions could not be verified")
+    except OSError:
+        print("[Config] Cannot secure api_keys.json permissions; refusing to load settings.")
+        return False
+    return True
 
 def config_exists() -> bool:
     return CONFIG_FILE.exists()
@@ -46,20 +92,56 @@ def _locked(fn):
     return wrapper
 
 
+def _sync_config_directory() -> None:
+    """Flush the directory entry after replacing the settings file on POSIX."""
+    if os.name == "nt":
+        return
+    try:
+        directory_fd = os.open(CONFIG_DIR, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        try:
+            os.fsync(directory_fd)
+        except OSError:
+            pass
+    finally:
+        try:
+            os.close(directory_fd)
+        except OSError:
+            pass
+
+
 def _write_config(data: dict) -> None:
     ensure_config_dir()
-    tmp = CONFIG_FILE.with_name(CONFIG_FILE.name + ".tmp")
-    tmp.write_text(json.dumps(data, indent=4), encoding="utf-8")
-    for attempt in range(20):
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{CONFIG_FILE.name}.",
+        suffix=".tmp",
+        dir=CONFIG_DIR,
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, indent=4)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(tmp, stat.S_IREAD | stat.S_IWRITE)
+        for attempt in range(20):
+            try:
+                os.replace(tmp, CONFIG_FILE)
+                _sync_config_directory()
+                return
+            except PermissionError:
+                # Windows: an antivirus scan or a reader can hold the file for a
+                # moment. Worth a short wait, never a lost setting.
+                if attempt == 19:
+                    raise
+                time.sleep(0.05)
+    finally:
         try:
-            os.replace(tmp, CONFIG_FILE)
-            return
-        except PermissionError:
-            # Windows: an antivirus scan or a reader can hold the file for a
-            # moment. Worth a short wait, never a lost setting.
-            if attempt == 19:
-                raise
-            time.sleep(0.05)
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _read_for_write() -> dict:
@@ -70,6 +152,10 @@ def _read_for_write() -> dict:
     may be a hand edit with a missing comma, and it still holds the user's key."""
     if not CONFIG_FILE.exists():
         return {}
+    if not _restrict_existing_config_permissions():
+        raise ConfigPermissionError(
+            "Cannot safely read existing settings; refusing to overwrite them."
+        )
     last = None
     for _ in range(3):
         try:
@@ -86,6 +172,157 @@ def _read_for_write() -> dict:
         pass
     return {}
 
+
+_SECRET_EXACT_KEYS = frozenset({
+    "gemini_api_key",
+    "elevenlabs_api_key",
+    "api_key",
+    "bot_token",
+    "pair_code",
+    "pairing_code",
+    "access_token",
+    "refresh_token",
+    "auth_token",
+    "client_secret",
+    "password",
+    "secret",
+    "token",
+    "private_key",
+    "credential",
+})
+_SECRET_SUFFIXES = (
+    "_api_key",
+    "_token",
+    "_secret",
+    "_password",
+    "_credential",
+    "_private_key",
+)
+
+
+def _is_secret_key(key: str) -> bool:
+    norm = str(key or "").strip().lower()
+    if norm in _SECRET_EXACT_KEYS:
+        return True
+    return any(norm.endswith(suffix) for suffix in _SECRET_SUFFIXES)
+
+
+def _provider_secret_id(provider_id: str, key: str) -> str:
+    return f"provider.{provider_id}.{key}"
+
+
+def _plugin_secret_id(namespace: str, key: str) -> str:
+    return f"plugin.{namespace}.{key}"
+
+
+def _store_secret_field(
+    secret_id: str,
+    raw_value: Any,
+    existing_value: Any = None,
+    *,
+    use_ref: bool = True,
+) -> Any:
+    """Persist a secret field into the OS vault and return its disk representation."""
+    from memory import credential_store
+
+    if credential_store.parse_secret_ref(raw_value) is not None:
+        return raw_value
+
+    val = str(raw_value or "").strip() if raw_value is not None else ""
+    if val:
+        credential_store.save_secret(secret_id, val)
+        return credential_store.make_secret_ref(secret_id) if use_ref else None
+
+    existing_ref = credential_store.parse_secret_ref(existing_value)
+    if existing_ref is not None:
+        credential_store.delete_secret(existing_ref)
+    elif isinstance(existing_value, str) and existing_value.strip():
+        try:
+            credential_store.delete_secret(secret_id)
+        except credential_store.CredentialStoreUnavailable:
+            pass
+    return "" if use_ref else None
+
+
+def _resolve_secret_field(
+    secret_id: str,
+    raw_value: Any,
+    *,
+    on_migrate=None,
+) -> str:
+    """Resolve a secret from `$secret_ref`, env/external provider, or legacy JSON."""
+    from memory import credential_store
+
+    ref_id = credential_store.parse_secret_ref(raw_value)
+    if ref_id is not None:
+        try:
+            return str(credential_store.get_secret(ref_id) or "")
+        except credential_store.CredentialStoreUnavailable:
+            return ""
+
+    legacy = str(raw_value or "").strip() if isinstance(raw_value, str) else ""
+    if not legacy:
+        try:
+            return str(credential_store.get_secret(secret_id) or "")
+        except credential_store.CredentialStoreUnavailable:
+            return ""
+
+    if on_migrate is not None:
+        try:
+            credential_store.save_secret(secret_id, legacy)
+            on_migrate(credential_store.make_secret_ref(secret_id))
+        except credential_store.CredentialStoreUnavailable:
+            pass
+    return legacy
+
+
+def _sanitize_provider_creds_for_write(
+    creds: dict,
+    existing_creds: dict | None = None,
+) -> dict:
+    """Externalize provider secret fields before persisting the providers block."""
+    prev_map = existing_creds if isinstance(existing_creds, dict) else {}
+    out: dict = {}
+    for pid, cfg in (creds or {}).items():
+        if not isinstance(cfg, dict):
+            continue
+        prev_cfg = prev_map.get(pid) if isinstance(prev_map.get(pid), dict) else {}
+        cleaned: dict = {}
+        for k, v in cfg.items():
+            if _is_secret_key(k):
+                cleaned[k] = _store_secret_field(
+                    _provider_secret_id(str(pid), k),
+                    v,
+                    prev_cfg.get(k),
+                    use_ref=True,
+                )
+            else:
+                cleaned[k] = v
+        out[pid] = cleaned
+    return out
+
+
+def _sanitize_plugin_ns_for_write(
+    namespace: str,
+    values: dict,
+    existing_values: dict | None = None,
+) -> dict:
+    """Externalize plugin secret fields before persisting a plugin namespace."""
+    prev_map = existing_values if isinstance(existing_values, dict) else {}
+    cleaned: dict = {}
+    for k, v in (values or {}).items():
+        if _is_secret_key(k):
+            cleaned[k] = _store_secret_field(
+                _plugin_secret_id(namespace, k),
+                v,
+                prev_map.get(k),
+                use_ref=True,
+            )
+        else:
+            cleaned[k] = v
+    return cleaned
+
+
 @_locked
 def save_api_keys(gemini_api_key: str) -> None:
     ensure_config_dir()
@@ -100,14 +337,26 @@ def save_api_keys(gemini_api_key: str) -> None:
         data.pop("gemini_api_key", None)
         data.pop("local_only", None)     # a key given is a choice to use Gemini again
     else:
-        from memory.credential_store import delete_gemini_key
+        from memory.credential_store import CredentialStoreUnavailable, delete_gemini_key
 
-        delete_gemini_key()
+        had_legacy = bool(str(data.get("gemini_api_key") or "").strip())
+        try:
+            delete_gemini_key()
+        except CredentialStoreUnavailable:
+            if not had_legacy:
+                raise
         data.pop("gemini_api_key", None)
     _write_config(data)
 
-def load_api_keys() -> dict:
+
+def load_api_keys(*, raise_on_permission: bool = False) -> dict:
     if not CONFIG_FILE.exists():
+        return {}
+    if not _restrict_existing_config_permissions():
+        if raise_on_permission:
+            raise ConfigPermissionError(
+                "Cannot safely read api_keys.json; settings permissions were refused."
+            )
         return {}
     for attempt in range(3):
         try:
@@ -122,7 +371,8 @@ def load_api_keys() -> dict:
             time.sleep(0.05)
     return {}
 
-def get_gemini_key() -> str | None:
+
+def get_gemini_key(*, raise_on_permission: bool = False) -> str | None:
     from memory.credential_store import CredentialStoreUnavailable, get_gemini_key as vault_key
 
     try:
@@ -130,22 +380,60 @@ def get_gemini_key() -> str | None:
     except CredentialStoreUnavailable:
         # Existing installations remain usable until an explicit successful
         # migration. New writes never fall back to this legacy plaintext value.
-        return load_api_keys().get("gemini_api_key")
+        val = load_api_keys(raise_on_permission=raise_on_permission).get("gemini_api_key")
+        return str(val).strip() if isinstance(val, str) and val.strip() else None
     if stored:
         return stored
-    legacy = str(load_api_keys().get("gemini_api_key") or "").strip()
+    legacy = str(load_api_keys(raise_on_permission=raise_on_permission).get("gemini_api_key") or "").strip()
     if not legacy:
         return None
-    try:
-        from memory.credential_store import save_gemini_key
+    with _lock:
+        try:
+            from memory.credential_store import save_gemini_key
 
-        save_gemini_key(legacy)
-        data = _read_for_write()
-        data.pop("gemini_api_key", None)
-        _write_config(data)
-        return legacy
-    except CredentialStoreUnavailable:
-        return legacy
+            data = _read_for_write()
+            current_legacy = str(data.get("gemini_api_key") or "").strip()
+            if not current_legacy:
+                return vault_key()
+            save_gemini_key(current_legacy)
+            data.pop("gemini_api_key", None)
+            _write_config(data)
+            return current_legacy
+        except CredentialStoreUnavailable:
+            return legacy
+
+
+def get_elevenlabs_key(*, raise_on_permission: bool = False) -> str | None:
+    """Resolve the optional top-level ElevenLabs key via the credential store."""
+    raw = load_api_keys(raise_on_permission=raise_on_permission).get("elevenlabs_api_key")
+
+    def _migrate(ref: dict) -> None:
+        with _lock:
+            data = _read_for_write()
+            if isinstance(data.get("elevenlabs_api_key"), str) and data["elevenlabs_api_key"].strip():
+                data["elevenlabs_api_key"] = ref
+                _write_config(data)
+
+    resolved = _resolve_secret_field("elevenlabs_api_key", raw, on_migrate=_migrate)
+    return resolved or None
+
+
+@_locked
+def save_elevenlabs_key(api_key: str) -> None:
+    """Store or clear the optional top-level ElevenLabs key in the OS vault."""
+    ensure_config_dir()
+    data = _read_for_write()
+    val = (api_key or "").strip()
+    if val:
+        data["elevenlabs_api_key"] = _store_secret_field(
+            "elevenlabs_api_key", val, data.get("elevenlabs_api_key"), use_ref=True
+        )
+    else:
+        _store_secret_field(
+            "elevenlabs_api_key", "", data.get("elevenlabs_api_key"), use_ref=True
+        )
+        data.pop("elevenlabs_api_key", None)
+    _write_config(data)
 
 def is_configured() -> bool:
     key = get_gemini_key()
@@ -394,7 +682,62 @@ def _patch_config(**fields) -> None:
     handled instead of nine."""
     ensure_config_dir()
     data = _read_for_write()
-    data.update(fields)
+    pending = dict(fields)
+
+    if "gemini_api_key" in pending:
+        raw_gemini = pending.pop("gemini_api_key")
+        from memory import credential_store
+
+        if credential_store.parse_secret_ref(raw_gemini) is None:
+            gkey = str(raw_gemini or "").strip()
+            if gkey:
+                credential_store.save_gemini_key(gkey)
+                data.pop("local_only", None)
+            else:
+                had_legacy = bool(str(data.get("gemini_api_key") or "").strip())
+                try:
+                    credential_store.delete_gemini_key()
+                except credential_store.CredentialStoreUnavailable:
+                    if not had_legacy:
+                        raise
+            data.pop("gemini_api_key", None)
+
+    if "providers" in pending and isinstance(pending["providers"], dict):
+        p_block = dict(pending.pop("providers"))
+        if isinstance(p_block.get("creds"), dict):
+            existing_creds = (
+                data.get("providers", {}).get("creds")
+                if isinstance(data.get("providers"), dict)
+                else None
+            )
+            p_block["creds"] = _sanitize_provider_creds_for_write(
+                p_block["creds"], existing_creds
+            )
+        data["providers"] = p_block
+
+    if "plugin_config" in pending and isinstance(pending["plugin_config"], dict):
+        pc_block = dict(pending.pop("plugin_config"))
+        existing_pc = data.get("plugin_config") if isinstance(data.get("plugin_config"), dict) else {}
+        sanitized_pc: dict = {}
+        for ns, ns_vals in pc_block.items():
+            if isinstance(ns_vals, dict):
+                sanitized_pc[ns] = _sanitize_plugin_ns_for_write(
+                    str(ns), ns_vals, existing_pc.get(ns)
+                )
+            else:
+                sanitized_pc[ns] = ns_vals
+        data["plugin_config"] = sanitized_pc
+
+    for k, v in pending.items():
+        if _is_secret_key(k):
+            stored = _store_secret_field(k, v, data.get(k), use_ref=True)
+            if stored:
+                data[k] = stored
+            else:
+                data.pop(k, None)
+        else:
+            data[k] = v
+
     _write_config(data)
 
 
@@ -433,11 +776,37 @@ def get_plugin_enabled(plugin_name: str) -> bool:
 # drop-in model intact. Values live under plugin_config[<namespace>][<key>].
 # A namespace defaults to the plugin name, but a suite of plugins (e.g. the
 # several printer plugins) can share ONE namespace.
+def _migrate_plugin_secret(namespace: str, key: str, ref: dict) -> None:
+    with _lock:
+        data = _read_for_write()
+        pc = data.get("plugin_config")
+        if not isinstance(pc, dict):
+            return
+        ns_cfg = pc.get(namespace)
+        if not isinstance(ns_cfg, dict):
+            return
+        if isinstance(ns_cfg.get(key), str) and ns_cfg[key].strip():
+            ns_cfg[key] = ref
+            _write_config(data)
+
+
 def get_plugin_config(namespace: str) -> dict:
     """All stored values for a namespace (empty dict if none set yet)."""
     cfg = load_api_keys().get("plugin_config")
     val = cfg.get(namespace) if isinstance(cfg, dict) else None
-    return dict(val) if isinstance(val, dict) else {}
+    if not isinstance(val, dict):
+        return {}
+    out: dict = {}
+    for k, v in val.items():
+        if _is_secret_key(k):
+            out[k] = _resolve_secret_field(
+                _plugin_secret_id(namespace, k),
+                v,
+                on_migrate=lambda ref, _ns=namespace, _k=k: _migrate_plugin_secret(_ns, _k, ref),
+            )
+        else:
+            out[k] = v
+    return out
 
 
 def get_plugin_setting(namespace: str, key: str, default=None):
@@ -457,8 +826,9 @@ def save_plugin_config(namespace: str, values: dict) -> None:
     cur = pc.get(namespace)
     if not isinstance(cur, dict):
         cur = {}
-    cur.update(values)
-    pc[namespace] = cur
+    merged = dict(cur)
+    merged.update(values or {})
+    pc[namespace] = _sanitize_plugin_ns_for_write(namespace, merged, cur)
     data["plugin_config"] = pc
     _write_config(data)
 
@@ -531,29 +901,73 @@ def _upgrade_ids(block: dict) -> dict:
     return block
 
 
-def get_providers() -> dict:
-    """The whole providers block, or an empty dict."""
+def _get_providers_raw() -> dict:
     val = load_api_keys().get("providers")
     return _upgrade_ids(dict(val)) if isinstance(val, dict) else {}
 
 
+def _migrate_provider_secret(provider_id: str, key: str, ref: dict) -> None:
+    with _lock:
+        data = _read_for_write()
+        block = data.get("providers")
+        if not isinstance(block, dict):
+            return
+        creds = block.get("creds")
+        if not isinstance(creds, dict):
+            return
+        cfg = creds.get(provider_id)
+        if not isinstance(cfg, dict):
+            return
+        if isinstance(cfg.get(key), str) and cfg[key].strip():
+            cfg[key] = ref
+            _write_config(data)
+
+
+def _resolve_provider_cfg(provider_id: str, cfg: dict) -> dict:
+    out: dict = {}
+    for k, v in cfg.items():
+        if _is_secret_key(k):
+            out[k] = _resolve_secret_field(
+                _provider_secret_id(provider_id, k),
+                v,
+                on_migrate=lambda ref, _pid=provider_id, _k=k: _migrate_provider_secret(
+                    _pid, _k, ref
+                ),
+            )
+        else:
+            out[k] = v
+    return out
+
+
+def get_providers() -> dict:
+    """The whole providers block, with credential references resolved."""
+    block = _get_providers_raw()
+    creds = block.get("creds")
+    if isinstance(creds, dict):
+        block["creds"] = {
+            pid: _resolve_provider_cfg(pid, cfg) if isinstance(cfg, dict) else cfg
+            for pid, cfg in creds.items()
+        }
+    return block
+
+
 def get_provider_mode() -> str:
     """Which engine holds the conversation. Defaults to Gemini Live."""
-    mode = str(get_providers().get("mode", "") or "").strip().lower()
+    mode = str(_get_providers_raw().get("mode", "") or "").strip().lower()
     return mode if mode in (PROVIDER_MODE_GEMINI, PROVIDER_MODE_PIPELINE) \
         else PROVIDER_MODE_GEMINI
 
 
 def get_provider_config(provider_id: str) -> dict:
     """Stored settings for one provider — address, model, key, limits."""
-    creds = get_providers().get("creds")
+    creds = _get_providers_raw().get("creds")
     val = creds.get(provider_id) if isinstance(creds, dict) else None
-    return dict(val) if isinstance(val, dict) else {}
+    return _resolve_provider_cfg(provider_id, val) if isinstance(val, dict) else {}
 
 
 def get_pipeline() -> dict:
     """Which provider fills each slot of the pipeline engine."""
-    val = get_providers().get("pipeline")
+    val = _get_providers_raw().get("pipeline")
     return dict(val) if isinstance(val, dict) else {}
 
 
@@ -569,12 +983,12 @@ def get_sidecar_provider() -> str:
     without changing the voice at all, is the cheapest useful thing this whole
     folder does.
     """
-    return str(get_providers().get("sidecar", "") or "").strip()
+    return str(_get_providers_raw().get("sidecar", "") or "").strip()
 
 
 @_locked
 def _patch_providers(**fields) -> None:
-    p = get_providers()
+    p = _get_providers_raw()
     p.update(fields)
     _patch_config(providers=p)
 
@@ -590,22 +1004,28 @@ def save_provider_mode(mode: str) -> None:
 def save_provider_config(provider_id: str, values: dict) -> None:
     """Merge settings for one provider. Only the given keys are touched, so the
     panel can save one field without reading and rewriting the rest."""
-    p = get_providers()
-    creds = p.get("creds")
-    if not isinstance(creds, dict):
-        creds = {}
-    cur = creds.get(provider_id)
-    cur = dict(cur) if isinstance(cur, dict) else {}
-    cur.update(values or {})
-    creds[provider_id] = cur
-    p["creds"] = creds
-    _patch_config(providers=p)
+    ensure_config_dir()
+    data = _read_for_write()
+    block = data.get("providers")
+    block = _upgrade_ids(dict(block)) if isinstance(block, dict) else {}
+    creds = block.get("creds")
+    creds = dict(creds) if isinstance(creds, dict) else {}
+    existing = creds.get(provider_id)
+    existing = dict(existing) if isinstance(existing, dict) else {}
+    merged = dict(existing)
+    merged.update(values or {})
+    creds[provider_id] = _sanitize_provider_creds_for_write(
+        {provider_id: merged}, {provider_id: existing}
+    )[provider_id]
+    block["creds"] = creds
+    data["providers"] = block
+    _write_config(data)
 
 
 @_locked
 def save_pipeline(stt: str = None, llm: str = None, tts: str = None) -> None:
     """Set one or more pipeline slots. `None` leaves a slot alone; '' clears it."""
-    p = get_providers()
+    p = _get_providers_raw()
     pipe = p.get("pipeline")
     pipe = dict(pipe) if isinstance(pipe, dict) else {}
     for slot, value in (("stt", stt), ("llm", llm), ("tts", tts)):
@@ -626,7 +1046,7 @@ def get_coding_provider() -> str:
     Its own setting because coding is the one background job where the model
     matters most and the request is longest — somebody may well want a strong
     coding model there and something cheap and fast for reading the screen."""
-    return str(get_providers().get("coding", "") or "").strip()
+    return str(_get_providers_raw().get("coding", "") or "").strip()
 
 
 def save_coding_provider(provider_id: str) -> None:
@@ -642,7 +1062,7 @@ def get_sidecar_first() -> bool:
     machine, and I accept it being slower' — so it is a choice someone makes,
     never a default they inherit.
     """
-    return bool(get_providers().get("sidecar_first", False))
+    return bool(_get_providers_raw().get("sidecar_first", False))
 
 
 def save_sidecar_first(enabled: bool) -> None:
@@ -686,10 +1106,13 @@ def save_providers(mode: str = None, pipeline: dict = None, creds: dict = None,
         store = block.get("creds")
         store = dict(store) if isinstance(store, dict) else {}
         for pid, values in (creds or {}).items():
-            one = store.get(pid)
-            one = dict(one) if isinstance(one, dict) else {}
-            one.update(values or {})
-            store[pid] = one
+            existing = store.get(pid)
+            existing = dict(existing) if isinstance(existing, dict) else {}
+            merged = dict(existing)
+            merged.update(values or {})
+            store[pid] = _sanitize_provider_creds_for_write(
+                {pid: merged}, {pid: existing}
+            )[pid]
         block["creds"] = store
     if sidecar is not None:
         block["sidecar"] = str(sidecar or "").strip()
@@ -700,3 +1123,94 @@ def save_providers(mode: str = None, pipeline: dict = None, creds: dict = None,
 
     data["providers"] = block
     _write_config(data)
+
+
+@_locked
+def migrate_plaintext_credentials() -> dict[str, Any]:
+    """Migrate any legacy plaintext credentials in api_keys.json to the vault.
+
+    Never deletes a plaintext value unless the vault write and read-back
+    verification succeed. Returns only field names and counts, never secrets.
+    """
+    from memory import credential_store
+
+    report: dict[str, Any] = {
+        "migrated": [],
+        "already_migrated": [],
+        "failed": [],
+        "backend": credential_store.backend_name(),
+    }
+    if not CONFIG_FILE.exists():
+        return report
+
+    data = _read_for_write()
+    changed = False
+
+    def _try_move(label: str, secret_id: str, raw: Any, setter) -> None:
+        nonlocal changed
+        if credential_store.parse_secret_ref(raw) is not None:
+            report["already_migrated"].append(label)
+            return
+        if not isinstance(raw, str) or not raw.strip():
+            return
+        try:
+            credential_store.save_secret(secret_id, raw.strip())
+            setter(credential_store.make_secret_ref(secret_id))
+            changed = True
+            report["migrated"].append(label)
+        except credential_store.CredentialStoreUnavailable:
+            report["failed"].append(label)
+
+    # Top-level Gemini key (removed rather than replaced with $secret_ref)
+    raw_gemini = data.get("gemini_api_key")
+    if isinstance(raw_gemini, str) and raw_gemini.strip():
+        try:
+            credential_store.save_gemini_key(raw_gemini.strip())
+            data.pop("gemini_api_key", None)
+            changed = True
+            report["migrated"].append("gemini_api_key")
+        except credential_store.CredentialStoreUnavailable:
+            report["failed"].append("gemini_api_key")
+
+    for top_key in list(data.keys()):
+        if top_key == "gemini_api_key":
+            continue
+        if _is_secret_key(top_key):
+            _try_move(
+                top_key,
+                top_key,
+                data.get(top_key),
+                lambda ref, _k=top_key: data.__setitem__(_k, ref),
+            )
+
+    prov = data.get("providers")
+    if isinstance(prov, dict) and isinstance(prov.get("creds"), dict):
+        for pid, cfg in prov["creds"].items():
+            if not isinstance(cfg, dict):
+                continue
+            for k in list(cfg.keys()):
+                if _is_secret_key(k):
+                    _try_move(
+                        f"providers.creds.{pid}.{k}",
+                        _provider_secret_id(str(pid), k),
+                        cfg.get(k),
+                        lambda ref, _cfg=cfg, _k=k: _cfg.__setitem__(_k, ref),
+                    )
+
+    pc = data.get("plugin_config")
+    if isinstance(pc, dict):
+        for ns, ns_cfg in pc.items():
+            if not isinstance(ns_cfg, dict):
+                continue
+            for k in list(ns_cfg.keys()):
+                if _is_secret_key(k):
+                    _try_move(
+                        f"plugin_config.{ns}.{k}",
+                        _plugin_secret_id(str(ns), k),
+                        ns_cfg.get(k),
+                        lambda ref, _cfg=ns_cfg, _k=k: _cfg.__setitem__(_k, ref),
+                    )
+
+    if changed:
+        _write_config(data)
+    return report

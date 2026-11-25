@@ -2941,12 +2941,14 @@ class MainWindow(QMainWindow):
             self._state_chip.set_state(state)
 
     def _check_config(self) -> bool:
+        from memory.config_manager import get_gemini_key
+
         d = _read_full_config()
         if not d.get("os_system"):
             return False
         providers = d.get("providers") if isinstance(d.get("providers"), dict) else {}
         # A Gemini key, or a choice to run without one: a local engine needs no key.
-        return bool(d.get("gemini_api_key") or d.get("local_only")
+        return bool(get_gemini_key() or d.get("local_only")
                     or str(providers.get("mode") or "").lower() == "pipeline")
 
     def _show_setup(self):
@@ -2967,11 +2969,16 @@ class MainWindow(QMainWindow):
         # the whole file with these two keys, so re-entering a key after an
         # "API key invalid" error erased every other setting — the wake word, the
         # local engine, plugin credentials, the assistant's name.
-        from memory.config_manager import update_config
-        fields = {"os_system": os_name, "local_only": not key}
-        if key:
-            fields["gemini_api_key"] = key
-        update_config(**fields)
+        from memory.config_manager import save_api_keys, update_config
+        from memory.credential_store import CredentialStoreUnavailable
+
+        try:
+            if key:
+                save_api_keys(key)
+            update_config(os_system=os_name, local_only=not key)
+        except CredentialStoreUnavailable as exc:
+            self._log.append_log(f"ERR: Secure credential storage unavailable — {exc}")
+            return
         try:
             from core import gemini as _gemini
             _gemini.api_key(refresh=True)

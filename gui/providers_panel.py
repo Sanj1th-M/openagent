@@ -1132,20 +1132,26 @@ class ProvidersOverlay(_HudOverlay):
 
     def _apply(self) -> None:
         from memory.config_manager import save_providers
+        from memory.credential_store import CredentialStoreUnavailable
 
         # ONE write, not five. See save_providers for what the five cost.
         creds = {sid: self._values(sid) for sid in list(self._edits)}
 
-        save_providers(
-            mode=self._mode,
-            pipeline={"stt": self._pipe.get("stt", ""),
-                      "llm": self._pipe.get("llm", ""),
-                      "tts": self._pipe.get("tts", "")},
-            creds=creds,
-            sidecar=self._sidecar,
-            sidecar_first=self._first_combo.currentData() == "before",
-            coding=self._coding,
-        )
+        try:
+            save_providers(
+                mode=self._mode,
+                pipeline={"stt": self._pipe.get("stt", ""),
+                          "llm": self._pipe.get("llm", ""),
+                          "tts": self._pipe.get("tts", "")},
+                creds=creds,
+                sidecar=self._sidecar,
+                sidecar_first=self._first_combo.currentData() == "before",
+                coding=self._coding,
+            )
+        except CredentialStoreUnavailable as exc:
+            for pid in list(self._edits):
+                self._say(pid, f"✕  {exc}", C.RED)
+            return
 
         # Providers are cached by configuration; a changed setting must not go
         # on being served by an object built from the old one.

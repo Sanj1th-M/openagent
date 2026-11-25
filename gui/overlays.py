@@ -1597,11 +1597,19 @@ class PluginSettingsOverlay(QWidget):
         save_plugin_config(ns, self._gather(ns))
 
     def _save_all(self):
+        from memory.credential_store import CredentialStoreUnavailable
+
         for sec in self._sections:
             ns = sec.get("namespace") or sec.get("plugin")
             if ns:
-                self._save_ns(ns)
                 lbl = self._status_labels.get(ns)
+                try:
+                    self._save_ns(ns)
+                except CredentialStoreUnavailable as exc:
+                    if lbl:
+                        lbl.setText(f"✕ {exc}")
+                        lbl.setStyleSheet(f"color: {C.RED}; background: transparent;")
+                    continue
                 if lbl:
                     lbl.setText("Saved ✓")
                     lbl.setStyleSheet(f"color: {C.PRI}; background: transparent;")

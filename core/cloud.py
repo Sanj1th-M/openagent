@@ -115,7 +115,7 @@ MANIFEST = (
     "core/routines/__init__.py", "core/routines/desktop.py", "core/routines/engine.py",
     "core/routines/rules.py",
     "agents/general.md", "agents/researcher.md",
-    "memory/__init__.py", "memory/config_manager.py", "memory/memory_manager.py",
+    "memory/__init__.py", "memory/config_manager.py", "memory/credential_store.py", "memory/memory_manager.py",
     "actions/background_monitor.py", "actions/file_processor.py",
     "actions/system_monitor.py", "actions/web_search.py",
     "plugins/__init__.py", "plugins/_telegram_ops.py", "plugins/telegram_remote.py",
@@ -153,11 +153,37 @@ _IMPORT_CHECK_CODE = (
 )
 
 
+def _sanitize_log(text: str) -> str:
+    """Redact accidental pairing URIs or bearer/token secrets from log lines."""
+    out = re.sub(r"(?i)\bjarvis-cloud://[^\s]+", "jarvis-cloud://[REDACTED]", str(text))
+    out = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", out)
+    out = re.sub(
+        r"(?i)((?:api[_-]?key|bot[_-]?token|token|secret|password|credential)\s*[:=]\s*)([^\s,;]+)",
+        r"\1[REDACTED]",
+        out,
+    )
+    return out
+
+
 def _say(text: str) -> None:
+    safe = _sanitize_log(text)
     try:
-        print(text, flush=True)
+        print(safe, flush=True)
     except UnicodeEncodeError:
-        print(text.encode("ascii", "replace").decode(), flush=True)
+        print(safe.encode("ascii", "replace").decode(), flush=True)
+
+
+def _write_operator_output(text: str) -> None:
+    """Write explicit operator-requested CLI output directly to stdout."""
+    out = str(text)
+    if not out.endswith("\n"):
+        out += "\n"
+    try:
+        sys.stdout.write(out)
+        sys.stdout.flush()
+    except UnicodeEncodeError:
+        sys.stdout.write(out.encode("ascii", "replace").decode())
+        sys.stdout.flush()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -781,7 +807,7 @@ class CloudState:
         try:
             fn(payload)
         except Exception as e:
-            _say(f"[Cloud] command listener failed: {e}")
+            _say(f"[Cloud] command listener failed ({type(e).__name__})")
         return True
 
     # events for the desktop
@@ -2516,14 +2542,26 @@ class Runtime:
 
     def apply_sync(self, body: dict) -> dict:
         from core import gemini
-        from memory.config_manager import _patch_config, get_plugin_config, save_plugin_config
+        from memory.config_manager import (
+            _patch_config,
+            get_plugin_config,
+            save_api_keys,
+            save_plugin_config,
+        )
+        from memory.credential_store import CredentialStoreUnavailable
 
         s = body.get("settings") or {}
-        patch = {k: str(s[k]).strip() for k in ("assistant_name", "user_name", "gemini_api_key")
+        patch = {k: str(s[k]).strip() for k in ("assistant_name", "user_name")
                  if str(s.get(k) or "").strip()}
         if patch:
             _patch_config(**patch)
-            gemini.api_key(refresh=True)
+        sync_key = str(s.get("gemini_api_key") or "").strip()
+        if sync_key:
+            try:
+                save_api_keys(sync_key)
+                gemini.api_key(refresh=True)
+            except CredentialStoreUnavailable:
+                self.log("SYS: Synced Gemini key could not be saved because secure credential storage is unavailable.")
         if s.get("tz_offset_min") is not None:
             self.set_tz(s["tz_offset_min"])
 
@@ -2919,13 +2957,17 @@ def main() -> None:
     state = CloudState()
     doc, cert, key = init_link(state, args.host, args.port, rotate=args.rotate)
     if args.init or args.pair_code or args.rotate:
-        _say("\nPairing code — paste it into JARVIS on your computer:\n"
-             "  ⚙ → PLUGIN SETTINGS → CLOUD AGENT → Pairing code\n\n"
-             f"  {make_pair_code(doc['host'], doc['port'], doc['secret'], doc['fingerprint'])}\n\n"
-             "Treat it like a password: anyone holding it can talk to this server.")
+        _write_operator_output(
+            "\nPairing code — paste it into JARVIS on your computer:\n"
+            "  ⚙ → PLUGIN SETTINGS → CLOUD AGENT → Pairing code\n\n"
+            f"  {make_pair_code(doc['host'], doc['port'], doc['secret'], doc['fingerprint'])}\n\n"
+            "Treat it like a password: anyone holding it can talk to this server."
+        )
         if args.rotate:
-            _say("The running service accepts the new code at once and refuses the old one — "
-                 "no restart needed. Paste the new code into JARVIS and press TEST & SYNC.")
+            _write_operator_output(
+                "The running service accepts the new code at once and refuses the old one — "
+                "no restart needed. Paste the new code into JARVIS and press TEST & SYNC."
+            )
         return
     Runtime().run(doc["port"], cert, key)
 
