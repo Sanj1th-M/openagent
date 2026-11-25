@@ -915,3 +915,45 @@ def test_dev_agent_successful_job_redacts_result_and_notification(capsys, tmp_pa
         json.dumps(dev_agent._job_snapshot()),
         json.dumps(player.snapshots),
     )
+
+def test_gemini_api_key_reloads_after_config_file_is_created(tmp_path, monkeypatch):
+    from core import gemini
+    from memory import config_manager
+
+    config_file = tmp_path / "config" / "api_keys.json"
+    config_file.parent.mkdir()
+    monkeypatch.setattr(gemini, "_KEY_FILE", config_file)
+    monkeypatch.setattr(gemini, "_cached_key", None)
+    monkeypatch.setattr(gemini, "_last_key_error", None)
+    monkeypatch.setattr(
+        config_manager, "_restrict_existing_config_permissions", lambda: True
+    )
+
+    assert gemini.api_key() == ""
+    assert gemini._cached_key is None
+
+    config_file.write_text(
+        json.dumps({"gemini_api_key": "restored-gemini-key"}),
+        encoding="utf-8",
+    )
+    assert gemini.api_key() == "restored-gemini-key"
+
+
+def test_gemini_api_key_handles_permission_error_from_exists(monkeypatch):
+    from core import gemini
+    from memory import config_manager
+
+    class InaccessibleConfigPath:
+        def exists(self):
+            raise PermissionError("access denied")
+
+    monkeypatch.setattr(gemini, "_KEY_FILE", InaccessibleConfigPath())
+    monkeypatch.setattr(gemini, "_cached_key", "stale-key")
+    monkeypatch.setattr(gemini, "_last_key_error", None)
+    monkeypatch.setattr(
+        config_manager, "_restrict_existing_config_permissions", lambda: True
+    )
+
+    assert gemini.api_key() == ""
+    assert gemini.api_key_error() == "permission"
+    assert gemini._cached_key is None
