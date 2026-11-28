@@ -12,6 +12,7 @@ Install deps:  pip install fastapi "uvicorn[standard]" cryptography
 import asyncio
 import base64
 import hashlib
+import json
 import re
 import secrets
 import socket
@@ -963,9 +964,9 @@ class DashboardServer:
 </style></head>
 <body>
 <script>
-  sessionStorage.setItem('jarvis_token','{tok}');
-  sessionStorage.setItem('jarvis_key','{key}');
-  localStorage.setItem('jarvis_device_token','{dev_tok}');
+  sessionStorage.setItem('jarvis_token', {json.dumps(tok)});
+  sessionStorage.setItem('jarvis_key', {json.dumps(key)});
+  localStorage.setItem('jarvis_device_token', {json.dumps(dev_tok)});
   setTimeout(function(){{location.replace('/')}},400);
 </script>
 <p>Connecting to JARVIS…</p>
@@ -1155,8 +1156,36 @@ class DashboardServer:
             tok = token.strip()
             if not _valid(tok):
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
-            safe = re.sub(r'[/\\]', '', filename)
-            path = self._uploads_dir / safe
+            safe = filename.strip()
+            if (
+                not safe
+                or safe in {".", ".."}
+                or not re.fullmatch(r"[A-Za-z0-9._ -]+", safe)
+            ):
+                return JSONResponse({"error": "Not found"}, status_code=404)
+            try:
+                base = self._uploads_dir.resolve()
+            except (OSError, RuntimeError):
+                return JSONResponse({"error": "Not found"}, status_code=404)
+            # Select only an existing upload entry; request text never builds
+            # the path handed to FileResponse.
+            try:
+                candidate = next((entry for entry in base.iterdir() if entry.name == safe), None)
+            except OSError:
+                candidate = None
+            if candidate is None:
+                return JSONResponse({"error": "Not found"}, status_code=404)
+            # Uploads are regular files; never follow a filesystem link.
+            if candidate.is_symlink():
+                return JSONResponse({"error": "Not found"}, status_code=404)
+            try:
+                path = candidate.resolve()
+            except (OSError, RuntimeError):
+                return JSONResponse({"error": "Not found"}, status_code=404)
+            try:
+                path.relative_to(base)
+            except ValueError:
+                return JSONResponse({"error": "Not found"}, status_code=404)
             if not path.exists() or not path.is_file():
                 return JSONResponse({"error": "Not found"}, status_code=404)
             return FileResponse(str(path), filename=safe)
