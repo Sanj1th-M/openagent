@@ -895,6 +895,10 @@ def paint_icon(p: QPainter, kind: str, r: QRectF, col: QColor) -> None:
                                  QPointF(cx, cy - s * 0.7), QPointF(cx, cy + s * 0.7),
                                  QPointF(cx - s * 0.4, cy + s * 0.3), QPointF(cx - s * 0.8, cy + s * 0.3)]))
         p.drawArc(QRectF(cx - s * 0.3, cy - s * 0.5, s * 0.8, s * 1.0), -60 * 16, 120 * 16)
+    elif kind == "screen":
+        p.drawRoundedRect(QRectF(cx - s * 0.82, cy - s * 0.65, s * 1.64, s * 1.05), 1.5, 1.5)
+        p.drawLine(QLineF(cx, cy + s * 0.40, cx, cy + s * 0.72))
+        p.drawLine(QLineF(cx - s * 0.42, cy + s * 0.72, cx + s * 0.42, cy + s * 0.72))
 
 
 class IconButton(QPushButton):

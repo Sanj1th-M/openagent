@@ -177,6 +177,18 @@ class JarvisUI:
     def on_audio_device_change(self, cb):
         self._win.on_audio_device_change = cb
 
+    @property
+    def on_screen_share_toggle(self):
+        return self._win.on_screen_share_toggle
+
+    @on_screen_share_toggle.setter
+    def on_screen_share_toggle(self, cb):
+        self._win.on_screen_share_toggle = cb
+
+    def set_screen_sharing(self, active: bool) -> None:
+        """Thread-safe: update the visible live screen-sharing indicator."""
+        self._win._screen_share_sig.emit(bool(active))
+
     def show_confirm(self, title: str, detail: str) -> None:
         """Thread-safe: raise the irreversible-action gate. Called from action
         handlers running in executor threads, so it goes through a signal."""

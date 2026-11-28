@@ -89,8 +89,17 @@ def _compress(img_bytes: bytes, source_format: str = "PNG") -> tuple[bytes, str]
         return img_bytes, f"image/{source_format.lower()}"
 
 
-def _capture_screen() -> tuple[bytes, str]:
+def _encode_rgb_jpeg(rgb: bytes, size: tuple[int, int]) -> tuple[bytes, str]:
+    """Encode raw RGB screenshot bytes directly to resized JPEG in memory."""
+    img = PIL.Image.frombytes("RGB", size, rgb)
+    img.thumbnail((_IMG_MAX_W, _IMG_MAX_H), PIL.Image.BILINEAR)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=_JPEG_Q, optimize=False)
+    return buf.getvalue(), "image/jpeg"
 
+
+def _capture_screen() -> tuple[bytes, str]:
+    """Capture the primary display into compressed in-memory image bytes."""
     if not _MSS:
         raise RuntimeError("mss is not installed. Run: pip install mss")
 
@@ -98,7 +107,12 @@ def _capture_screen() -> tuple[bytes, str]:
         monitors = sct.monitors          # [0] = all combined, [1..n] = real screens
         target   = monitors[1] if len(monitors) > 1 else monitors[0]
         shot     = sct.grab(target)
-        png      = mss.tools.to_png(shot.rgb, shot.size)
+        if _PIL:
+            try:
+                return _encode_rgb_jpeg(shot.rgb, shot.size)
+            except Exception as e:
+                print(f"[Vision] ⚠️  Direct RGB encode failed: {e}")
+        png = mss.tools.to_png(shot.rgb, shot.size)
 
     return _compress(png, "PNG")
 
