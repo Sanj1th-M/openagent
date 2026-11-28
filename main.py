@@ -44,6 +44,7 @@ except Exception as _e:
 # ─────────────────────────────────────────────────────────────────────────────
 
 import asyncio
+import hashlib
 import re
 import threading
 import time
@@ -53,6 +54,7 @@ import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 try:
     import sounddevice as sd
@@ -185,6 +187,8 @@ _TAIL_MARGIN = 0.25
 # for a slow tool call (those send their own traffic, which clears the deadline)
 # while turning an unbounded hang into a blip.
 _STALL_LIMIT = 30.0
+_SCREEN_SHARE_INTERVAL = 1.0
+_SCREEN_SHARE_MAX_ERRORS = 3
 
 _VIS_WIN = 1024        # ~43 ms analysis window at 24 kHz: enough for formants
 _VIS_HOP = 480         # 20 ms between frames, i.e. 50 shapes a second
@@ -318,9 +322,11 @@ def _describe_limits(has_vision: bool, has_mic: bool) -> str:
 
     if has_vision:
         out.append(
-            "- Your sight is not continuous. You see nothing until you call a "
-            "vision tool, and then only that single frame at that moment — you "
-            "cannot watch, monitor or notice something changing on screen.")
+            "- Your sight is not continuous by default. Unless the user has "
+            "explicitly enabled live screen sharing, you see nothing until you "
+            "call a vision tool, and then only that single frame at that "
+            "moment — you cannot watch, monitor or notice something changing "
+            "on screen.")
     else:
         out.append("- You have no sight at all in this build.")
     if has_mic:
@@ -437,6 +443,26 @@ TOOL_DECLARATIONS = [
             "turn off camera, that's creepy, etc."
         ),
         "parameters": {"type": "OBJECT", "properties": {}, "required": []}
+    },
+    {
+        "name": "screen_share",
+        "description": (
+            "Starts, stops, or checks continuous real-time desktop screen sharing in Gemini Live. "
+            "ONLY call with action='start' when the user EXPLICITLY asks to share their screen "
+            "live or continuously. NEVER enable screen sharing on your own. "
+            "Call with action='stop' when the user asks to stop sharing their screen. "
+            "For a one-time screenshot question when live sharing is off, use screen_process instead."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "start | stop | status",
+                },
+            },
+            "required": ["action"],
+        },
     },
     {
         "name": "manage_monitor",
@@ -605,10 +631,10 @@ class JarvisLive:
         self._platform_notes_shown = False
         self.ui             = ui
         self._asst_name     = "Jarvis"   # updated each session from config
-        self.session              = None
+        self.session: Any         = None
         self.audio_in_queue       = None
-        self.out_queue            = None
-        self._loop                     = None
+        self.out_queue: asyncio.Queue[dict[str, Any]] | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._is_speaking         = False
         self._speaking_lock       = threading.Lock()
         self._phone_active        = False   # True while phone mic is streaming; pauses PC mic
@@ -618,12 +644,20 @@ class JarvisLive:
         self._vision_last_time     = 0.0     # monotonic time of last screen_process call (cooldown guard)
         self._vision_busy          = False   # True while a vision capture/inject cycle is in flight
         self._interrupted          = False   # True while draining audio after user interrupt
+        self._screen_sharing       = False   # Explicit opt-in live desktop screen sharing
+        self._screen_share_lock    = threading.Lock()
+        self._screen_share_task: asyncio.Task | None = None
+        self._screen_share_stop: asyncio.Event | None = None
+        self._screen_share_gen: int = 0
+        self._realtime_send_lock: asyncio.Lock | None = None
+        self._last_screen_frame_digest: bytes | None = None
+        self._screen_share_interval: float = _SCREEN_SHARE_INTERVAL
         # Which engine is holding the conversation, and what it can do.
         # None means Gemini Live — the default and, unless somebody has gone to
         # the providers settings and chosen otherwise, always the case. Every
         # branch below that reads it treats None as "everything is available",
         # so the Live path is exactly what it was.
-        self._engine_caps          = None
+        self._engine_caps: dict[str, Any] | None = None
         # Set only when a local pipeline is running, so push-to-talk can tell it
         # the turn is over. Live decides that on the server; nothing does here.
         self._engine               = None
@@ -660,6 +694,7 @@ class JarvisLive:
         self.ui.on_interrupt      = self.interrupt
         self.ui.on_voice_change   = self._on_voice_change     # voice picker → rebuild session
         self.ui.on_audio_device_change = self._on_audio_device_change
+        self.ui.on_screen_share_toggle = self._ui_screen_share_toggle
         self._reconnect_event: asyncio.Event | None = None
         self._reconnect_keep = True   # False → next rebuild drops the resumption handle
 
@@ -817,6 +852,7 @@ class JarvisLive:
     def sleep(self, reason: str = "timeout") -> None:
         if not self._awake:
             return
+        self.stop_screen_sharing(reason="assistant asleep")
         self._awake = False
         detector = getattr(self, "_wake_detector", None)
         if detector is not None:
@@ -970,6 +1006,7 @@ class JarvisLive:
     def finish(self, timeout: float = 15.0) -> None:
         """Called on the Qt thread after the window has closed. The window is
         already gone, so this wait is not something anybody sits through."""
+        self.stop_screen_sharing(reason="shutdown")
         loop = getattr(self, "_loop", None)
         if loop is not None and loop.is_running():
             try:
@@ -1446,7 +1483,7 @@ class JarvisLive:
         # declaration list is byte-for-byte what it has always been.
         if self._engine_caps is not None:
             _caps = self._engine_caps
-            _blocked = set()
+            _blocked = {"screen_share"}
             if not _caps.get("vision"):
                 _blocked |= {"screen_process", "close_camera"}
             if not _caps.get("tools"):
@@ -1663,6 +1700,25 @@ class JarvisLive:
                 self.ui.stop_camera_stream()
                 result = "Camera closed."
 
+            elif name == "screen_share":
+                action = str(args.get("action", "status")).lower().strip()
+                if action == "start":
+                    _, result = self.start_screen_sharing(source="voice")
+                elif action == "stop":
+                    stopped = self.stop_screen_sharing(reason="requested by user")
+                    result = (
+                        "Live screen sharing stopped."
+                        if stopped else "Live screen sharing is already off."
+                    )
+                elif action == "status":
+                    result = (
+                        "Live screen sharing is currently active."
+                        if self._screen_sharing
+                        else "Live screen sharing is currently off."
+                    )
+                else:
+                    result = "Specify action: start, stop, or status."
+
             elif name == "system_status":
                 r = await loop.run_in_executor(None, get_system_status)
                 result = str(r)
@@ -1786,20 +1842,254 @@ class JarvisLive:
             **_extra
         )
 
+    def _set_ui_screen_sharing(self, active: bool) -> None:
+        fn = getattr(self.ui, "set_screen_sharing", None)
+        if callable(fn):
+            try:
+                fn(bool(active))
+            except Exception:
+                pass
+
+    def _ui_screen_share_toggle(self, enable: bool) -> tuple[bool, str]:
+        if enable:
+            return self.start_screen_sharing(source="ui")
+        self.stop_screen_sharing(reason="stopped by user")
+        return False, "Live screen sharing stopped."
+
+    def start_screen_sharing(self, source: str = "ui") -> tuple[bool, str]:
+        """Explicitly enable continuous live desktop screen sharing."""
+        if self._engine_caps is not None:
+            msg = "Live screen sharing is only available in Gemini Live mode."
+            self._set_ui_screen_sharing(False)
+            self.ui.write_log(f"SYS: {msg}")
+            return False, msg
+
+        loop = getattr(self, "_loop", None)
+        session = self.session
+        if session is None or loop is None or not loop.is_running():
+            msg = "Cannot start screen sharing while disconnected."
+            self._set_ui_screen_sharing(False)
+            self.ui.write_log(f"SYS: {msg}")
+            return False, msg
+
+        if self._wake_enabled and not self._awake:
+            msg = "Wake Jarvis first before starting live screen sharing."
+            self._set_ui_screen_sharing(False)
+            self.ui.write_log(f"SYS: {msg}")
+            return False, msg
+
+        try:
+            from core import platform_support
+            if not platform_support.detect().can_capture_screen:
+                msg = "Screen capture is not permitted in this display session."
+                self._set_ui_screen_sharing(False)
+                self.ui.write_log(f"SYS: {msg}")
+                return False, msg
+        except Exception:
+            pass
+
+        with self._screen_share_lock:
+            if self._screen_sharing:
+                return True, "Live screen sharing is already active."
+            self._screen_sharing = True
+            self._screen_share_gen += 1
+            gen = self._screen_share_gen
+            self._last_screen_frame_digest = None
+
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+
+        if running is loop:
+            self._spawn_screen_share_task(session, gen)
+        else:
+            loop.call_soon_threadsafe(self._spawn_screen_share_task, session, gen)
+
+        self._set_ui_screen_sharing(True)
+        self.ui.write_log("SYS: Live screen sharing started.")
+        return True, "Live screen sharing started."
+
+    def stop_screen_sharing(self, reason: str = "") -> bool:
+        """Immediately stop live desktop screen sharing and cancel frame sending."""
+        with self._screen_share_lock:
+            was_active = self._screen_sharing
+            self._screen_sharing = False
+            self._screen_share_gen += 1
+            self._last_screen_frame_digest = None
+            task = self._screen_share_task
+            stop_ev = self._screen_share_stop
+            self._screen_share_task = None
+            self._screen_share_stop = None
+
+        loop = getattr(self, "_loop", None)
+        if loop is not None and loop.is_running():
+            def _cancel():
+                if stop_ev is not None:
+                    stop_ev.set()
+                if task is not None and not task.done():
+                    task.cancel()
+
+            try:
+                running = asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            if running is loop:
+                _cancel()
+            else:
+                loop.call_soon_threadsafe(_cancel)
+        else:
+            if stop_ev is not None:
+                stop_ev.set()
+            if task is not None and not task.done():
+                task.cancel()
+
+        self._set_ui_screen_sharing(False)
+        if was_active:
+            suffix = f" ({reason})" if reason else ""
+            self.ui.write_log(f"SYS: Live screen sharing stopped{suffix}.")
+        return was_active
+
+    def _spawn_screen_share_task(self, session, gen: int) -> None:
+        with self._screen_share_lock:
+            if (
+                not self._screen_sharing
+                or self._screen_share_gen != gen
+                or self.session is not session
+            ):
+                return
+            if self._screen_share_stop is not None:
+                self._screen_share_stop.set()
+            if self._screen_share_task is not None and not self._screen_share_task.done():
+                self._screen_share_task.cancel()
+            stop_ev = asyncio.Event()
+            self._screen_share_stop = stop_ev
+            self._screen_share_task = asyncio.create_task(
+                self._screen_share_loop(session, gen, stop_ev)
+            )
+
+    async def _send_video_frame(
+        self, session, img_bytes: bytes, mime_type: str, gen: int
+    ) -> bool:
+        """Send one captured screen frame if sharing is still active."""
+        if not img_bytes or not str(mime_type or "").startswith("image/"):
+            return False
+        lock = self._realtime_send_lock
+        if lock is None:
+            lock = asyncio.Lock()
+            self._realtime_send_lock = lock
+        async with lock:
+            with self._screen_share_lock:
+                if (
+                    not self._screen_sharing
+                    or self._screen_share_gen != gen
+                    or self.session is not session
+                ):
+                    return False
+            await session.send_realtime_input(
+                video=types.Blob(data=img_bytes, mime_type=mime_type)
+            )
+            return True
+
+    async def _screen_share_loop(
+        self, session, gen: int, stop_event: asyncio.Event
+    ) -> None:
+        """Capture and stream desktop screenshots at ~1 FPS while sharing is active."""
+        loop = asyncio.get_running_loop()
+        consecutive_errors = 0
+        try:
+            while not stop_event.is_set():
+                with self._screen_share_lock:
+                    active = (
+                        self._screen_sharing
+                        and self._screen_share_gen == gen
+                        and self.session is session
+                    )
+                if not active:
+                    break
+                if self._wake_enabled and not self._awake:
+                    self.stop_screen_sharing(reason="assistant asleep")
+                    break
+
+                t0 = time.monotonic()
+                try:
+                    img_b, mime_t = await loop.run_in_executor(None, _capture_screen)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    if "mss is not installed" in str(e):
+                        print("[ScreenShare] Capture dependency missing: mss")
+                        self.stop_screen_sharing(reason="mss unavailable")
+                        break
+                    consecutive_errors += 1
+                    print(
+                        f"[ScreenShare] Capture error "
+                        f"({consecutive_errors}/{_SCREEN_SHARE_MAX_ERRORS}): "
+                        f"{type(e).__name__}"
+                    )
+                    if consecutive_errors >= _SCREEN_SHARE_MAX_ERRORS:
+                        self.stop_screen_sharing(reason="capture failed")
+                        break
+                else:
+                    consecutive_errors = 0
+                    if stop_event.is_set():
+                        break
+                    digest = hashlib.blake2b(img_b, digest_size=16).digest()
+                    if digest != self._last_screen_frame_digest:
+                        try:
+                            sent = await self._send_video_frame(
+                                session, img_b, mime_t, gen
+                            )
+                            if sent:
+                                self._last_screen_frame_digest = digest
+                            else:
+                                break
+                        except asyncio.CancelledError:
+                            break
+                        except Exception as e:
+                            print(
+                                f"[ScreenShare] Send error: {type(e).__name__}"
+                            )
+                            self.stop_screen_sharing(reason="connection interrupted")
+                            break
+
+                elapsed = time.monotonic() - t0
+                wait_s = max(0.05, float(self._screen_share_interval) - elapsed)
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=wait_s)
+                    break
+                except asyncio.TimeoutError:
+                    continue
+        except asyncio.CancelledError:
+            pass
+        finally:
+            with self._screen_share_lock:
+                if self._screen_share_gen == gen:
+                    self._screen_share_task = None
+                    self._screen_share_stop = None
+
     async def _send_realtime(self):
         while True:
             msg = await self.out_queue.get()
+            session = self.session
+            if session is None:
+                continue
             # Gemini 3.x Live rejects the old realtime_input.media_chunks field
             # (what `media=...` maps to) and closes the socket with a 1007. Send
             # mic / phone PCM through the new `audio` field instead. Queue items
             # are {"data": <bytes>, "mime_type": <str>} from _listen_audio and
             # the phone relay.
-            await self.session.send_realtime_input(
-                audio=types.Blob(
-                    data=msg["data"],
-                    mime_type=msg.get("mime_type", "audio/pcm"),
-                )
+            blob = types.Blob(
+                data=msg["data"],
+                mime_type=msg.get("mime_type", "audio/pcm"),
             )
+            lock = self._realtime_send_lock
+            if lock is not None:
+                async with lock:
+                    if self.session is session:
+                        await session.send_realtime_input(audio=blob)
+            else:
+                await session.send_realtime_input(audio=blob)
 
     async def _listen_audio(self):
         print("[JARVIS] 🎤 Mic started")
@@ -2802,6 +3092,7 @@ class JarvisLive:
                     self.audio_in_queue   = asyncio.Queue()
                     self.out_queue        = asyncio.Queue(maxsize=200)
                     self._turn_done_event = asyncio.Event()
+                    self._realtime_send_lock = asyncio.Lock()
                     self._rx_deadline     = None
 
                     # Reset transient state that must not carry over from a previous session
@@ -3023,6 +3314,8 @@ class JarvisLive:
                     self._conn_backoff = 3
             finally:
                 self.session = None
+                self._realtime_send_lock = None
+                self.stop_screen_sharing(reason="session ended")
                 # Only save if there was a real conversation (≥3 turns)
                 if len(self._session_log) >= 3:
                     self._keep_task(asyncio.create_task(self._save_session_summary()))

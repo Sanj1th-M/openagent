@@ -35,7 +35,6 @@ from PyQt6.QtWidgets import (
 
 from gui.theme import (
     API_FILE,
-    APP_PROTOCOL,
     APP_VERSION,
     C,
     CONFIG_DIR,
@@ -117,6 +116,7 @@ class MainWindow(QMainWindow):
     _quiz_sig       = pyqtSignal(str, object, object)  # (topic, questions, grader)
     _quiz_hide_sig  = pyqtSignal()
     _review_sig     = pyqtSignal(str, str, object, object)  # document review payload
+    _screen_share_sig = pyqtSignal(bool)     # live desktop screen sharing active/inactive
 
     def __init__(self, face_path: str):
         super().__init__()
@@ -152,6 +152,8 @@ class MainWindow(QMainWindow):
         self.on_interrupt      = None   # callable: () -> None — stop JARVIS mid-speech
         self.on_voice_change   = None   # callable: () -> None — rebuild session with new voice
         self.on_audio_device_change = None  # callable: () -> None — reopen audio streams
+        self.on_screen_share_toggle = None  # callable: (enable: bool) -> (bool, str)
+        self._screen_sharing   = False
         self._confirm_overlay  = None   # live ConfirmBanner, if one is on screen
         self.get_plugins       = None   # callable: () -> list[dict], set by JarvisLive
         self.get_plugin_settings = None # callable: () -> list[dict] settings schemas, set by JarvisLive
@@ -420,6 +422,7 @@ class MainWindow(QMainWindow):
         self._quiz_sig.connect(self._show_quiz)
         self._quiz_hide_sig.connect(self._hide_quiz)
         self._review_sig.connect(self._show_review)
+        self._screen_share_sig.connect(self._apply_screen_sharing)
         self._cam_stop = threading.Event()
 
         # Camera preview overlay (child of central widget, positioned in resizeEvent)
@@ -1260,7 +1263,7 @@ class MainWindow(QMainWindow):
         self._title_lbl.setStyleSheet(f"color: {C.WHITE}; background: transparent;")
         self._title_lbl.setToolTip(self._subtitle(display))
         name_col.addWidget(self._title_lbl)
-        self._sub_lbl = QLabel(f"{APP_VERSION}  ·  PERSONAL AI SYSTEM")
+        self._sub_lbl = QLabel("PERSONAL AI SYSTEM")
         self._sub_lbl.setFont(px_font(9, QFont.Weight.DemiBold, spacing=2.2))
         self._sub_lbl.setStyleSheet(f"color: {C.PRI_DIM}; background: transparent;")
         name_col.addWidget(self._sub_lbl)
@@ -1349,11 +1352,13 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_status_strip"):
             return
         mic = ("MIC · MUTED", "MUTED_C") if self._muted else ("MIC · LIVE", "GREEN")
-        self._status_strip.set_items([
+        items = [
             (f"ENGINE · {getattr(self, '_engine_label', 'GEMINI LIVE')}", "GREEN"),
             mic,
-            (f"PROTOCOL · {APP_PROTOCOL}", "PRI"),
-        ])
+        ]
+        if getattr(self, "_screen_sharing", False):
+            items.append(("SCREEN · SHARING", "ACC"))
+        self._status_strip.set_items(items)
 
     def _build_left_panel(self) -> QWidget:
         w = QWidget()
@@ -1648,6 +1653,13 @@ class MainWindow(QMainWindow):
         self._interrupt_btn.clicked.connect(self._do_interrupt)
         row.addWidget(self._interrupt_btn, 1)
         cmd.body.addLayout(row)
+
+        self._screen_share_btn = IconButton("screen", 34, "SHARE SCREEN", "PRI")
+        self._screen_share_btn.setToolTip(
+            "Explicitly start or stop live desktop screen sharing with Gemini Live"
+        )
+        self._screen_share_btn.clicked.connect(self._toggle_screen_share)
+        cmd.body.addWidget(self._screen_share_btn)
         lay.addWidget(cmd)
         return w
 
@@ -1729,6 +1741,10 @@ class MainWindow(QMainWindow):
         self._hud_btn = _row(QPushButton())
         self._hud_btn.clicked.connect(self._toggle_hud_style)
         self._refresh_hud_btn()
+
+        self._ctrl_screen_btn = _row(QPushButton())
+        self._ctrl_screen_btn.clicked.connect(self._toggle_screen_share)
+        self._refresh_screen_share_ui()
 
         w.adjustSize()
         return w
@@ -2898,6 +2914,42 @@ class MainWindow(QMainWindow):
     def _do_interrupt(self):
         if self.on_interrupt:
             self.on_interrupt()
+
+    def _toggle_screen_share(self):
+        want = not getattr(self, "_screen_sharing", False)
+        cb = getattr(self, "on_screen_share_toggle", None)
+        if not cb:
+            self._log.append_log("SYS: Live screen sharing is unavailable right now.")
+            self._apply_screen_sharing(False)
+            return
+        try:
+            res = cb(want)
+            active = bool(res[0]) if isinstance(res, tuple) else bool(res)
+        except Exception as e:
+            self._log.append_log(f"ERR: Screen sharing failed — {e}")
+            active = False
+        self._apply_screen_sharing(active)
+
+    def _apply_screen_sharing(self, active: bool):
+        self._screen_sharing = bool(active)
+        if hasattr(self, "hud"):
+            self.hud.screen_sharing = self._screen_sharing
+            self.hud.update()
+        self._refresh_screen_share_ui()
+        self._refresh_status_strip()
+
+    def _refresh_screen_share_ui(self):
+        active = bool(getattr(self, "_screen_sharing", False))
+        if hasattr(self, "_screen_share_btn"):
+            if active:
+                self._screen_share_btn.set_look("screen", "STOP SCREEN SHARE", "ACC")
+            else:
+                self._screen_share_btn.set_look("screen", "SHARE SCREEN", "PRI")
+        if hasattr(self, "_ctrl_screen_btn"):
+            self._ctrl_screen_btn.setText(
+                "🖥  SCREEN SHARE: ON" if active else "🖥  SCREEN SHARE: OFF"
+            )
+            self._ctrl_screen_btn.setStyleSheet(btn_css("on" if active else "off"))
 
     def _toggle_mute(self):
         # A deliberate press settles the question: whatever the video did, or is

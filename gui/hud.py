@@ -56,6 +56,7 @@ class HudCanvas(QWidget):
 
         self.muted    = False
         self.speaking = False
+        self.screen_sharing = False
         self.state    = "INITIALISING"
         self._assistant_name = assistant_name
 
@@ -683,5 +684,23 @@ class HudCanvas(QWidget):
             w = max(1.5, bw - 2.0)
             p.fillRect(QRectF(x, wy - hgt, w, hgt), c)
             p.fillRect(QRectF(x, wy + 1.5, w, hgt * 0.45), blend(c, 0.30))
+
+        if self.screen_sharing and W > 240:
+            badge_w, badge_h = 148.0, 22.0
+            bx, by = W - badge_w - 18.0, 12.0
+            acc_col = qcol(C.ACC)
+            p.setBrush(QBrush(blend(acc_col, 0.14)))
+            p.setPen(QPen(blend(acc_col, 0.75), 1.0))
+            p.drawPolygon(chamfer(QRectF(bx, by, badge_w, badge_h), 5.0))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(acc_col))
+            p.drawEllipse(QPointF(bx + 12.0, by + badge_h / 2.0), 3.2, 3.2)
+            p.setFont(px_font(10, QFont.Weight.DemiBold, spacing=1.6))
+            p.setPen(QPen(acc_col))
+            p.drawText(
+                QRectF(bx + 20.0, by, badge_w - 24.0, badge_h),
+                Qt.AlignmentFlag.AlignVCenter,
+                "SCREEN SHARING",
+            )
 
         p.end()   # end deterministically so the backing store never flushes an active painter
